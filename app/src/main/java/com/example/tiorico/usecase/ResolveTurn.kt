@@ -1,53 +1,59 @@
 package com.example.tiorico.usecase
 
-import com.example.tiorico.data.Action
-import com.example.tiorico.data.GameState
+import com.example.tiorico.data.ActionDocument
+import com.example.tiorico.data.PlayerDocument
 
-class ResolveTurn{
+data class TurnResult(
+    val updatedPlayers: List<PlayerDocument>,
+    val nextTurn: Int
+)
 
-    fun execute(gameState: GameState): GameState {
+class ResolveTurn {
 
-        val factor = gameState.currentTurn.toDouble() / gameState.maxTurns
+    fun execute(
+        players: List<PlayerDocument>,
+        currentTurn: Int,
+        maxTurns: Int
+    ): TurnResult {
 
-        val jugadoresActualizados = gameState.players.map { player ->
+        val factor = currentTurn.toDouble() / maxTurns
 
-            if (!player.isActive) return@map player
+        val updatedPlayers = players.map { player ->
+
+            if (!player.active) return@map player
 
             var dinero = player.cash
 
             when (player.lastAction) {
 
-                Action.AHORRAR -> {
-                    val ganancia = (50 * (1 - factor)).toInt()
+                "AHORRAR" -> {
+                    val ganancia = (50.0 * (1 - factor))
                     dinero += ganancia
                 }
 
-                Action.INVERTIR -> {
+                "INVERTIR" -> {
                     val probGanar = 0.6 - (factor * 0.3)
                     val random = Math.random()
-
-                    dinero += if (random < probGanar) 100 else -50
+                    dinero += if (random < probGanar) 100.0 else -50.0
                 }
 
-                Action.GASTAR -> {
-                    val costo = (50 * (1 + factor)).toInt()
+                "GASTAR" -> {
+                    val costo = (50 * (1 + factor))
                     dinero -= costo
                 }
-
-                else -> {}
             }
 
             player.copy(
-                cash = dinero,
-                isActive = dinero > 0,
-                lastAction = null,
-                ready = false
+                cash       = dinero,
+                active     = dinero > 0,
+                lastAction = "",
+                done       = false       // reset para el siguiente turno
             )
         }
 
-        return gameState.copy(
-            players = jugadoresActualizados,
-            currentTurn = gameState.currentTurn + 1
+        return TurnResult(
+            updatedPlayers = updatedPlayers,
+            nextTurn       = currentTurn + 1
         )
     }
 }

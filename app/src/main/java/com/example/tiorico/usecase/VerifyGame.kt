@@ -1,18 +1,18 @@
 package com.example.tiorico.usecase
 
-import com.example.tiorico.data.GameState
-import com.example.tiorico.data.GameStatus
+import com.example.tiorico.data.GameDocument
+import com.example.tiorico.data.PlayerDocument
 
 class VerifyGame {
 
-    fun execute(gameState: GameState): GameState {
+    fun execute(gameDocument: GameDocument, players: List<PlayerDocument>): GameDocument {
 
-        val actives = gameState.players.count { it.isActive }
+        val actives = players.count { it.active }
 
-        val finished = gameState.currentTurn > gameState.maxTurns || actives <= 1
+        val finished = gameDocument.actualTurn >= gameDocument.maxTurns || actives == 0
 
         return if (finished) {
-            gameState.copy(status = GameStatus.FINALIZADO)
-        } else gameState
+            gameDocument.copy(status = "FINALIZADO")
+        } else gameDocument
     }
 }

@@ -3,10 +3,6 @@ package com.example.tiorico.presentation.viewmodel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
-import com.example.tiorico.data.Action
-import com.example.tiorico.data.GameState
-import com.example.tiorico.data.GameStatus
-import com.example.tiorico.data.Player
 import com.example.tiorico.usecase.EveryoneIsReady
 import com.example.tiorico.usecase.RegisterAction
 import com.example.tiorico.usecase.ResolveTurn
