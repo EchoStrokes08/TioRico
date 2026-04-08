@@ -1,7 +1,6 @@
 package com.example.tiorico.usecase
 
-import com.example.tiorico.data.ActionDocument
-import com.example.tiorico.data.PlayerDocument
+import com.example.tiorico.data.models.PlayerDocument
 
 data class TurnResult(
     val updatedPlayers: List<PlayerDocument>,

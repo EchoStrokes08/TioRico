@@ -1,6 +1,6 @@
 package com.example.tiorico.usecase
 
-import com.example.tiorico.data.PlayerDocument
+import com.example.tiorico.data.models.PlayerDocument
 
 class EveryoneIsReady {
     fun execute(

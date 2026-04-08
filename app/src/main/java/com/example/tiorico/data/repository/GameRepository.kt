@@ -1,29 +1,17 @@
-package com.example.tiorico.repository
+package com.example.tiorico.data.repository
 
-
+import com.example.tiorico.data.models.ActionDocument
+import com.example.tiorico.data.models.ChatDocument
+import com.example.tiorico.data.models.EventDocument
+import com.example.tiorico.data.models.GameDocument
+import com.example.tiorico.data.models.PlayerDocument
+import com.example.tiorico.data.models.TurnDocument
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
-import com.example.tiorico.data.*
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// GameRepository
-//
-// Es el ÚNICO punto de contacto entre la app y Firestore.
-// El ViewModel no sabe que existe Firestore — solo habla con este repositorio.
-//
-// Tiene dos tipos de funciones:
-//
-//   1. suspend fun  → operación única (crear, actualizar, leer una vez)
-//                     el ViewModel la llama con viewModelScope.launch { }
-//
-//   2. fun observe → retorna un Flow que emite cada vez que Firestore cambia
-//                     el ViewModel lo colecta con collectAsState() o collect{}
-//
-// ═══════════════════════════════════════════════════════════════════════════════
 
 class GameRepository(private val db: FirebaseFirestore = FirebaseFirestore.getInstance()) {
 
@@ -48,9 +36,9 @@ class GameRepository(private val db: FirebaseFirestore = FirebaseFirestore.getIn
     suspend fun createGame(maxTurns: Int): DataResult<String> = safeCall {
         val ref = gamesCol().document()
         val game = GameDocument(
-            id        = ref.id,
-            maxTurns  = maxTurns,
-            status    = "ESPERANDO"
+            id = ref.id,
+            maxTurns = maxTurns,
+            status = "ESPERANDO"
         )
         ref.set(game).await()
         ref.id
@@ -60,7 +48,9 @@ class GameRepository(private val db: FirebaseFirestore = FirebaseFirestore.getIn
     // Cada vez que cambia actualTurn o status, el Flow emite el nuevo GameDocument
     fun observeGame(gameId: String): Flow<GameDocument?> = callbackFlow {
         val listener = gameDoc(gameId).addSnapshotListener { snap, error ->
-            if (error != null) { close(error); return@addSnapshotListener }
+            if (error != null) {
+                close(error); return@addSnapshotListener
+            }
             trySend(snap?.toObject(GameDocument::class.java))
         }
         awaitClose { listener.remove() }
@@ -90,7 +80,9 @@ class GameRepository(private val db: FirebaseFirestore = FirebaseFirestore.getIn
     // Cuando cualquier jugador cambia su cash, done o active → el Flow emite la lista nueva
     fun observePlayers(gameId: String): Flow<List<PlayerDocument>> = callbackFlow {
         val listener = playersCol(gameId).addSnapshotListener { snap, error ->
-            if (error != null) { close(error); return@addSnapshotListener }
+            if (error != null) {
+                close(error); return@addSnapshotListener
+            }
             val players = snap?.toObjects(PlayerDocument::class.java) ?: emptyList()
             trySend(players)
         }
@@ -107,10 +99,10 @@ class GameRepository(private val db: FirebaseFirestore = FirebaseFirestore.getIn
     ): DataResult<Unit> = safeCall {
         playerDoc(gameId, playerId).update(
             mapOf(
-                "cash"       to newCash,
+                "cash" to newCash,
                 "lastAction" to lastAction,
-                "active"     to active,
-                "done"       to true         // marcamos que ya jugó este turno
+                "active" to active,
+                "done" to true         // marcamos que ya jugó este turno
             )
         ).await()
     }
@@ -162,10 +154,11 @@ class GameRepository(private val db: FirebaseFirestore = FirebaseFirestore.getIn
     }
 
     // Obtiene las acciones del turno (para mostrar resumen al final del turno)
-    suspend fun getActions(gameId: String, turnId: String): DataResult<List<ActionDocument>> = safeCall {
-        val snap = actionsCol(gameId, turnId).get().await()
-        snap.toObjects(ActionDocument::class.java)
-    }
+    suspend fun getActions(gameId: String, turnId: String): DataResult<List<ActionDocument>> =
+        safeCall {
+            val snap = actionsCol(gameId, turnId).get().await()
+            snap.toObjects(ActionDocument::class.java)
+        }
 
 
     // ════════════════════════════════════════════════════════════════════════
@@ -184,10 +177,19 @@ class GameRepository(private val db: FirebaseFirestore = FirebaseFirestore.getIn
             .orderBy("timestamp", Query.Direction.ASCENDING)
             .limitToLast(50)
             .addSnapshotListener { snap, error ->
-                if (error != null) { close(error); return@addSnapshotListener }
+                if (error != null) {
+                    close(error); return@addSnapshotListener
+                }
                 val messages = snap?.toObjects(ChatDocument::class.java) ?: emptyList()
                 trySend(messages)
             }
         awaitClose { listener.remove() }
+    }
+
+
+    //Encuentra una sala por su id:
+    suspend fun findGameByCode(gameId: String): DataResult<GameDocument?> = safeCall {
+        val snap = gameDoc(gameId).get().await()
+        snap.toObject(GameDocument::class.java)
     }
 }

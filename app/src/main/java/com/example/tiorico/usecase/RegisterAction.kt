@@ -1,7 +1,7 @@
 package com.example.tiorico.usecase
 
-import com.example.tiorico.data.ActionDocument
-import com.example.tiorico.data.PlayerDocument
+import com.example.tiorico.data.models.ActionDocument
+import com.example.tiorico.data.models.PlayerDocument
 
 class RegisterAction {
     fun execute(

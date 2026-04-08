@@ -1,4 +1,4 @@
-package com.example.tiorico.data;
+package com.example.tiorico.data.models
 
 import com.google.firebase.firestore.DocumentId;
 import com.google.firebase.Timestamp;

@@ -1,4 +1,4 @@
-package com.example.tiorico.repository
+package com.example.tiorico.data.repository
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // DataResult

@@ -1,7 +1,7 @@
 package com.example.tiorico.usecase
 
-import com.example.tiorico.data.GameDocument
-import com.example.tiorico.data.PlayerDocument
+import com.example.tiorico.data.models.GameDocument
+import com.example.tiorico.data.models.PlayerDocument
 
 class VerifyGame {
 
