@@ -2,58 +2,56 @@ package com.example.tiorico.ui.Views
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.layout.ContentScale
 import com.example.tiorico.R
+import com.example.tiorico.ui.auth.AuthViewModel
+import com.example.tiorico.data.models.AuthUiState
 
 @Composable
 fun LoginScreen(
-    email: String,
-    password: String,
-    isLoading: Boolean,
-    errorMessage: String?,
-    onEmailChange: (String) -> Unit,
-    onPasswordChange: (String) -> Unit,
-    onLoginClick: () -> Unit,
+    viewModel: AuthViewModel,
     onRegisterClick: () -> Unit,
     onGoToLobby: () -> Unit
 ) {
+
+    val uiState by viewModel.uiState.collectAsState()
+
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+
+    val isLoading = uiState is AuthUiState.Loading
+    val errorMessage = if (uiState is AuthUiState.Error) {
+        (uiState as AuthUiState.Error).message
+    } else null
+
     Scaffold { innerPadding ->
         Column(modifier = Modifier.padding(innerPadding)) {
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(
-                        brush = Brush.verticalGradient(colors = listOf(Color(0xFF010570), Color(0xFF0105FF), Color(0xFF0105FF), Color(0xFF010570)))
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF010570),
+                                Color(0xFF0105FF),
+                                Color(0xFF0105FF),
+                                Color(0xFF010570)
+                            )
+                        )
                     ),
                 contentAlignment = Alignment.Center
             ) {
@@ -64,6 +62,7 @@ fun LoginScreen(
                         .padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+
                     Image(
                         painter = painterResource(id = R.drawable.logo_tiorico),
                         contentDescription = "Logo",
@@ -73,9 +72,8 @@ fun LoginScreen(
                     Spacer(modifier = Modifier.height(32.dp))
 
                     OutlinedTextField(
-
                         value = email,
-                        onValueChange = onEmailChange,
+                        onValueChange = { email = it },
                         placeholder = { Text("Email") },
                         leadingIcon = { Icon(Icons.Default.Person, null) },
                         modifier = Modifier.fillMaxWidth(),
@@ -87,7 +85,7 @@ fun LoginScreen(
                             unfocusedTextColor = Color.White,
                             focusedPlaceholderColor = Color.White,
                             unfocusedPlaceholderColor = Color.White,
-                            unfocusedLeadingIconColor =  Color(0xFFffd700)
+                            unfocusedLeadingIconColor = Color(0xFFFFD700)
                         )
                     )
 
@@ -95,7 +93,7 @@ fun LoginScreen(
 
                     OutlinedTextField(
                         value = password,
-                        onValueChange = onPasswordChange,
+                        onValueChange = { password = it },
                         placeholder = { Text("Password") },
                         leadingIcon = { Icon(Icons.Default.Lock, null) },
                         visualTransformation = PasswordVisualTransformation(),
@@ -108,14 +106,14 @@ fun LoginScreen(
                             unfocusedTextColor = Color.White,
                             focusedPlaceholderColor = Color.White,
                             unfocusedPlaceholderColor = Color.White,
-                            unfocusedLeadingIconColor =  Color(0xFFffd700)
+                            unfocusedLeadingIconColor = Color(0xFFFFD700)
                         )
                     )
 
                     Spacer(modifier = Modifier.height(24.dp))
 
                     Button(
-                        onClick = onLoginClick,
+                        onClick = { viewModel.login(email, password) },
                         enabled = !isLoading,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color(0xFFFFD700)
@@ -123,7 +121,10 @@ fun LoginScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         if (isLoading) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color.Black
+                            )
                         } else {
                             Text("Iniciar Sesión", color = Color.Black)
                         }
@@ -155,23 +156,19 @@ fun LoginScreen(
                         Text(text = errorMessage, color = Color.Red)
                     }
                 }
+
+                // 🔥 Overlay de carga (igual que arquitectura ejemplo)
+                if (isLoading) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.3f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = Color.Yellow)
+                    }
+                }
             }
         }
     }
 }
-
-/*
-@Preview(showBackground = true, showSystemUi = true)
-@Composable
-fun LoginScreenPreview() {
-    LoginScreen(
-        username = "",
-        password = "",
-        isLoading = false,
-
-        onUsernameChange = {},
-        onPasswordChange = {},
-        onLoginClick = {},
-        onRegisterClick = {},
-    )
-}*/

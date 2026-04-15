@@ -2,243 +2,162 @@ package com.example.tiorico.ui.lobby
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.tiorico.data.models.GameDocument
-import com.example.tiorico.data.models.PlayerDocument
-import com.example.tiorico.data.repository.DataResult
-import com.example.tiorico.data.repository.GameRepository
+import com.example.tiorico.data.models.LobbyUiState
+import com.example.tiorico.data.repository.LobbyRepository
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.util.UUID
+import kotlinx.coroutines.tasks.await
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// LobbyViewModel
-//
-// Responsabilidad: todo lo que pasa ANTES de que empiece el juego.
-//   - El host crea la sala y obtiene un roomCode para compartir
-//   - Los jugadores entran con el roomCode
-//   - Todos esperan en la sala viendo quién se conectó
-//   - El host arranca el juego cuando quiere
-//
-// Este ViewModel NO sabe nada de turnos ni acciones — eso es GameViewModel.
-// ═══════════════════════════════════════════════════════════════════════════════
+class LobbyViewModel : ViewModel() {
 
-data class LobbyUiState(
-    val playerName: String           = "",   // nombre que escribió el jugador
-    val playerId: String             = "",   // UUID generado localmente
-    val game: GameDocument?          = null, // la sala actual
-    val players: List<PlayerDocument> = emptyList(),
-    val isHost: Boolean              = false,// ¿este jugador creó la sala?
-    val isLoading: Boolean           = false,
-    val errorMessage: String?        = null,
-    val navigateToGame: Boolean      = false // señal para navegar al juego
-)
-
-class LobbyViewModel(
-    private val repository: GameRepository = GameRepository()
-) : ViewModel() {
+    private val repository = LobbyRepository()
 
     private val _uiState = MutableStateFlow(LobbyUiState())
-    val uiState: StateFlow<LobbyUiState> = _uiState.asStateFlow()
+    val uiState = _uiState.asStateFlow()
 
+    private var currentRoomCode: String = ""
 
-    // ════════════════════════════════════════════════════════════════════════
-    // PASO 1 — El jugador escribe su nombre
-    // Llamar cada vez que cambia el texto del campo nombre
-    // ════════════════════════════════════════════════════════════════════════
+    // 🔥 NUEVO: cargar username desde Firebase
+    fun loadUserName() {
+        viewModelScope.launch {
+            try {
+                val userId = FirebaseAuth.getInstance().currentUser?.uid
+
+                if (userId.isNullOrEmpty()) {
+                    _uiState.value = _uiState.value.copy(
+                        errorMessage = "Usuario no autenticado"
+                    )
+                    return@launch
+                }
+
+                val db = FirebaseDatabase.getInstance().reference
+
+                val snapshot = db.child("users")
+                    .child(userId)
+                    .get()
+                    .await()
+
+                val username = snapshot.child("username")
+                    .getValue(String::class.java) ?: ""
+
+                _uiState.value = _uiState.value.copy(
+                    playerName = username
+                )
+
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    errorMessage = e.message ?: "Error cargando usuario"
+                )
+            }
+        }
+    }
 
     fun onNameChanged(name: String) {
-        _uiState.update { it.copy(playerName = name) }
+        _uiState.value = _uiState.value.copy(playerName = name)
     }
 
+    fun onRoomCodeChanged(code: String) {
+        _uiState.value = _uiState.value.copy(roomCode = code)
+    }
 
-    // ════════════════════════════════════════════════════════════════════════
-    // PASO 2A — Crear sala (el host)
-    // Genera el roomCode, crea la partida en Firestore y se une como primer jugador
-    // ════════════════════════════════════════════════════════════════════════
+    fun createGame() {
+        val name = _uiState.value.playerName
 
-    fun createGame(maxTurns: Int = 10) {
-        val name = _uiState.value.playerName.trim()
         if (name.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "Escribe tu nombre primero") }
+            _uiState.value = _uiState.value.copy(errorMessage = "Ingresa tu nombre")
             return
         }
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
+            _uiState.value = _uiState.value.copy(isLoading = true)
 
-            // Genera un id local para este jugador (no necesitamos Auth)
-            val playerId = UUID.randomUUID().toString()
+            val result = repository.createGame(name)
 
-            when (val result = repository.createGame(maxTurns)) {
-                is DataResult.Success -> {
-                    val gameId = result.data
+            if (result.isSuccess) {
+                currentRoomCode = result.getOrNull() ?: ""
 
-                    // Una vez creada la sala, el host se une como jugador
-                    repository.joinGame(
-                        gameId = gameId,
-                        player = PlayerDocument(
-                            id     = playerId,
-                            name   = name,
-                            cash   = 1000.0,
-                            active = true,
-                            done   = false
-                        )
-                    )
+                listenRoom()
 
-                    // Guarda el playerId localmente para identificar al host
-                    _uiState.update {
-                        it.copy(
-                            playerId  = playerId,
-                            isHost    = true,
-                            isLoading = false
-                        )
-                    }
-
-                    // Empieza a observar la sala
-                    startObserving(gameId)
-                }
-                is DataResult.Error -> {
-                    _uiState.update {
-                        it.copy(isLoading = false, errorMessage = result.message)
-                    }
-                }
+                _uiState.value = _uiState.value.copy(
+                    isHost = true,
+                    isLoading = false,
+                    roomCode = currentRoomCode
+                )
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = result.exceptionOrNull()?.message
+                )
             }
         }
     }
 
+    fun joinGame() {
+        val name = _uiState.value.playerName
+        val roomCode = _uiState.value.roomCode
 
-    // ════════════════════════════════════════════════════════════════════════
-    // PASO 2B — Unirse a sala (los demás jugadores)
-    // Busca la sala por roomCode y agrega al jugador
-    // ════════════════════════════════════════════════════════════════════════
-
-    fun joinGame(roomCode: String) {
-        val name = _uiState.value.playerName.trim()
         if (name.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "Escribe tu nombre primero") }
+            _uiState.value = _uiState.value.copy(errorMessage = "Ingresa tu nombre")
             return
         }
+
         if (roomCode.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "Escribe el código de sala") }
+            _uiState.value = _uiState.value.copy(errorMessage = "Ingresa el código de sala")
             return
         }
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
+            _uiState.value = _uiState.value.copy(isLoading = true)
 
-            // Busca la sala por el código de 6 letras
-            when (val result = repository.findGameByCode(roomCode.uppercase())) {
-                is DataResult.Success -> {
-                    val game = result.data
-                    if (game == null) {
-                        _uiState.update {
-                            it.copy(isLoading = false, errorMessage = "Sala no encontrada")
-                        }
-                        return@launch
-                    }
+            val result = repository.joinGame(roomCode, name)
 
-                    val playerId = UUID.randomUUID().toString()
+            if (result.isSuccess) {
+                currentRoomCode = roomCode
 
-                    repository.joinGame(
-                        gameId = game.id,
-                        player = PlayerDocument(
-                            id     = playerId,
-                            name   = name,
-                            cash   = 1000.0,
-                            active = true,
-                            done   = false
-                        )
-                    )
+                listenRoom()
 
-                    _uiState.update {
-                        it.copy(
-                            playerId  = playerId,
-                            isHost    = false,
-                            isLoading = false
-                        )
-                    }
-
-                    startObserving(game.id)
-                }
-                is DataResult.Error -> {
-                    _uiState.update {
-                        it.copy(isLoading = false, errorMessage = result.message)
-                    }
-                }
+                _uiState.value = _uiState.value.copy(
+                    players = result.getOrNull() ?: emptyList(),
+                    isLoading = false
+                )
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = result.exceptionOrNull()?.message
+                )
             }
         }
     }
 
+    private fun listenRoom() {
+        repository.listenPlayers(currentRoomCode) { players ->
+            _uiState.value = _uiState.value.copy(players = players)
+        }
 
-    // ════════════════════════════════════════════════════════════════════════
-    // OBSERVADORES — escuchan Firestore en tiempo real
-    // Se activan apenas el jugador entra a la sala (crea o se une)
-    // ════════════════════════════════════════════════════════════════════════
-
-    private fun startObserving(gameId: String) {
-        observeGame(gameId)
-        observePlayers(gameId)
-    }
-
-    // Observa el documento de la partida
-    // Cuando el host cambia status a "JUGANDO" → todos navegan al juego
-    private fun observeGame(gameId: String) {
-        viewModelScope.launch {
-            repository.observeGame(gameId).collect { game ->
-                _uiState.update { it.copy(game = game) }
-
-                // Si el host arrancó el juego, navegar a GameFragment
-                if (game?.status == "JUGANDO") {
-                    _uiState.update { it.copy(navigateToGame = true) }
-                }
-            }
+        repository.listenGameStart(currentRoomCode) {
+            _uiState.value = _uiState.value.copy(navigateToGame = true)
         }
     }
-
-    // Observa la lista de jugadores en tiempo real
-    // Cada vez que alguien se une → la pantalla se actualiza automáticamente
-    private fun observePlayers(gameId: String) {
-        viewModelScope.launch {
-            repository.observePlayers(gameId).collect { players ->
-                _uiState.update { it.copy(players = players) }
-            }
-        }
-    }
-
-
-    // ════════════════════════════════════════════════════════════════════════
-    // ARRANCAR EL JUEGO — solo el host puede hacer esto
-    // ════════════════════════════════════════════════════════════════════════
 
     fun startGame() {
-        val game = _uiState.value.game ?: return
-        if (!_uiState.value.isHost) return
-        if (_uiState.value.players.size < 2) {
-            _uiState.update { it.copy(errorMessage = "Se necesitan al menos 2 jugadores") }
-            return
-        }
-
         viewModelScope.launch {
-            // Crea el primer turno
-            repository.createTurn(game.id, 1)
-            // Cambia el estado → todos los observers detectan el cambio y navegan
-            repository.updateGameStatus(game.id, "JUGANDO")
+            val result = repository.startGame(currentRoomCode)
+
+            if (result.isSuccess) {
+                _uiState.value = _uiState.value.copy(navigateToGame = true)
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    errorMessage = result.exceptionOrNull()?.message
+                )
+            }
         }
     }
-
-
-    // ════════════════════════════════════════════════════════════════════════
-    // LIMPIEZA
-    // ════════════════════════════════════════════════════════════════════════
 
     fun onNavigatedToGame() {
-        _uiState.update { it.copy(navigateToGame = false) }
-    }
-
-    fun clearError() {
-        _uiState.update { it.copy(errorMessage = null) }
+        _uiState.value = _uiState.value.copy(navigateToGame = false)
     }
 }

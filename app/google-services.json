@@ -1,13 +1,14 @@
 {
   "project_info": {
-    "project_number": "203026616617",
-    "project_id": "tiorico-96207",
-    "storage_bucket": "tiorico-96207.firebasestorage.app"
+    "project_number": "635829915678",
+    "firebase_url": "https://tiorico-393cd-default-rtdb.firebaseio.com",
+    "project_id": "tiorico-393cd",
+    "storage_bucket": "tiorico-393cd.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:203026616617:android:42184a59d0746a1f35a738",
+        "mobilesdk_app_id": "1:635829915678:android:ee42d545af32ba84ac1e0f",
         "android_client_info": {
           "package_name": "com.example.tiorico"
         }
@@ -15,7 +16,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyCz18jhd50mcKB5pyfYrVy89ezhSy1I1OQ"
+          "current_key": "AIzaSyAhr07W9ioTOMj36UcLXNDj7LPAwfTZb_s"
         }
       ],
       "services": {

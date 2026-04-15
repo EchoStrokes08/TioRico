@@ -2,125 +2,98 @@ package com.example.tiorico.ui.auth
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.google.firebase.auth.FirebaseAuth
+import com.example.tiorico.data.models.AuthUiState
+import com.example.tiorico.data.repository.AuthRepository
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
 
-// ═══════════════════════════════════════════════════════
-// UI STATE
-// ═══════════════════════════════════════════════════════
-data class AuthUiState(
-    val username: String = "",
-    val email: String = "",
-    val password: String = "",
-    val confirmPassword: String = "",
-    val isLoading: Boolean = false,
-    val errorMessage: String? = null,
-    val isLoggedIn: Boolean = false
-)
+class AuthViewModel : ViewModel() {
 
-class AuthViewModel(
-    private val auth: FirebaseAuth = FirebaseAuth.getInstance()
-) : ViewModel() {
+    private val repository = AuthRepository()
 
-    private val _uiState = MutableStateFlow(AuthUiState())
-    val uiState: StateFlow<AuthUiState> = _uiState.asStateFlow()
+    private val _uiState = MutableStateFlow<AuthUiState>(AuthUiState.Idle)
+    val uiState = _uiState.asStateFlow()
 
-    // ═══════════════════════════════════════════════════════
-    // INPUTS
-    // ═══════════════════════════════════════════════════════
+    private val _eventFlow = MutableSharedFlow<UiEvent>()
+    val eventFlow = _eventFlow.asSharedFlow()
 
-    fun onUsernameChange(value: String) {
-        _uiState.value = _uiState.value.copy(username = value)
+    init {
+        checkSession()
     }
 
-    fun onEmailChange(value: String) {
-        _uiState.value = _uiState.value.copy(email = value)
+    private fun checkSession() {
+        viewModelScope.launch {
+            try {
+                val user = repository.getCurrentUser()
+
+                if (user != null) {
+                    val (userId, username) = repository.getUserData()
+                    _uiState.value = AuthUiState.Success(userId, username)
+                }
+
+            } catch (e: Exception) {
+                _uiState.value = AuthUiState.Error("Error cargando sesión")
+            }
+        }
     }
 
-    fun onPasswordChange(value: String) {
-        _uiState.value = _uiState.value.copy(password = value)
-    }
-
-    fun onConfirmPasswordChange(value: String) {
-        _uiState.value = _uiState.value.copy(confirmPassword = value)
-    }
-
-    // ═══════════════════════════════════════════════════════
-    // LOGIN
-    // ═══════════════════════════════════════════════════════
-
-    fun login() {
-        val email = _uiState.value.email.trim()
-        val password = _uiState.value.password
-
+    fun login(email: String, password: String) {
         if (email.isBlank() || password.isBlank()) {
-            _uiState.value = _uiState.value.copy(
-                errorMessage = "Email y contraseña requeridos"
-            )
+            _uiState.value = AuthUiState.Error("Campos vacíos")
             return
         }
 
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
+            _uiState.value = AuthUiState.Loading
 
-            try {
-                auth.signInWithEmailAndPassword(email, password).await()
+            val result = repository.login(email, password)
 
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    isLoggedIn = true
-                )
+            if (result.isSuccess) {
+                try {
+                    val (userId, username) = repository.getUserData()
+                    _uiState.value = AuthUiState.Success(userId, username)
+                    _eventFlow.emit(UiEvent.NavigateToHome)
 
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    errorMessage = e.message
+                } catch (e: Exception) {
+                    _uiState.value = AuthUiState.Error("Error obteniendo usuario")
+                }
+            }
+        }
+    }
+
+    fun register(email: String, password: String) {
+        if (email.isBlank() || password.isBlank()) {
+            _uiState.value = AuthUiState.Error("Campos vacíos")
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.value = AuthUiState.Loading
+
+            val result = repository.register(email, password)
+
+            if (result.isSuccess) {
+                val (userId, username) = repository.getUserData()
+                _uiState.value = AuthUiState.Success(userId, username)
+                _eventFlow.emit(UiEvent.NavigateToHome)
+            } else {
+                _uiState.value = AuthUiState.Error(
+                    result.exceptionOrNull()?.message ?: "Error en registro"
                 )
             }
         }
     }
 
-    // ═══════════════════════════════════════════════════════
-    // REGISTER
-    // ═══════════════════════════════════════════════════════
-
-    fun register() {
-        val email = _uiState.value.email.trim()
-        val password = _uiState.value.password
-        val confirm = _uiState.value.confirmPassword
-
-        if (password != confirm) {
-            _uiState.value = _uiState.value.copy(
-                errorMessage = "Las contraseñas no coinciden"
-            )
-            return
-        }
-
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
-
-            try {
-                auth.createUserWithEmailAndPassword(email, password).await()
-
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    isLoggedIn = true
-                )
-
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    errorMessage = e.message
-                )
-            }
-        }
+    fun logout() {
+        repository.logout()
+        _uiState.value = AuthUiState.Idle
     }
 
-    fun clearError() {
-        _uiState.value = _uiState.value.copy(errorMessage = null)
+    sealed class UiEvent {
+        object NavigateToHome : UiEvent()
+        data class ShowSnackbar(val message: String) : UiEvent()
     }
 }

@@ -41,7 +41,7 @@ android {
 }
 
 dependencies {
-    implementation(platform("com.google.firebase:firebase-bom:34.11.0"))
+    implementation(platform("com.google.firebase:firebase-bom:34.12.0"))
     implementation("com.google.firebase:firebase-analytics")
 
     implementation("androidx.appcompat:appcompat:1.6.1")
@@ -49,6 +49,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.0.0")
     implementation("androidx.media3:media3-ui:1.0.0")
 
+    implementation("com.google.firebase:firebase-database")
 
     implementation("com.google.firebase:firebase-firestore:26.1.2")
 
@@ -69,6 +70,7 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.compose.material.icons.extended)
+    implementation(libs.firebase.database)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

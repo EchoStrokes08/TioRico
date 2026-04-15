@@ -1,36 +1,50 @@
 package com.example.tiorico.ui.Views
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.random.Random
+import com.example.tiorico.data.models.ActionDocument
+import com.example.tiorico.ui.game.GameViewModel
 
 @Composable
 fun GameScreen(
-    onFinishGame: (Boolean) -> Unit
+    viewModel: GameViewModel,
+    onFinishGame: () -> Unit
 ) {
-    val money = 1200
-    val turn = 5
-    val maxTurns = 10
+    val state by viewModel.uiState.collectAsState()
+
+    val player = state.currentPlayer
+    val game = state.game
+
+    // 🚀 navegación a resultados
+    LaunchedEffect(state.navigateToResult) {
+        if (state.navigateToResult) {
+            onFinishGame()
+            viewModel.onNavigatedToResult()
+        }
+    }
+
+    // ⛔ loading inicial
+    if (state.isLoading || player == null || game == null) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Cargando partida...", color = Color.White)
+        }
+        return
+    }
 
     Box(
         modifier = Modifier
@@ -47,17 +61,32 @@ fun GameScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text("Dinero: $$money", color = Color.White)
-            Text("Turno: $turn / $maxTurns", color = Color.White)
+            // 💰 DINERO REAL DEL PLAYER
+            Text("Dinero: $${player.cash}", color = Color.White)
+
+            // 🔁 TURNO REAL DEL JUEGO
+            Text("Turno: ${game.actualTurn} / ${game.maxTurns}", color = Color.White)
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text("¡Ganaste $300!", color = Color.Green)
+            // 🎲 ÚLTIMO EVENTO
+            Text(
+                state.lastEvent?.description ?: "Esperando evento...",
+                color = Color.Green
+            )
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            // 🚫 DESACTIVAR SI YA JUGÓ
+            val canPlay = player.active && player.lastAction.isNullOrBlank()
+
             Button(
-                onClick = { onFinishGame(Random.nextBoolean()) },
+                onClick = {
+                    viewModel.playAction(
+                        ActionDocument(type = "AHORRAR")
+                    )
+                },
+                enabled = canPlay,
                 modifier = Modifier.fillMaxWidth(0.7f)
             ) {
                 Text("Ahorrar")
@@ -66,7 +95,12 @@ fun GameScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             Button(
-                onClick = { onFinishGame(Random.nextBoolean()) },
+                onClick = {
+                    viewModel.playAction(
+                        ActionDocument(type = "INVERTIR")
+                    )
+                },
+                enabled = canPlay,
                 modifier = Modifier.fillMaxWidth(0.7f)
             ) {
                 Text("Invertir")
@@ -75,11 +109,22 @@ fun GameScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             Button(
-                onClick = { onFinishGame(Random.nextBoolean()) },
+                onClick = {
+                    viewModel.playAction(
+                        ActionDocument(type = "GASTAR")
+                    )
+                },
                 colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                enabled = canPlay,
                 modifier = Modifier.fillMaxWidth(0.7f)
             ) {
                 Text("Gastar")
+            }
+
+            // ⏳ feedback cuando ya jugó
+            if (!canPlay) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Esperando a otros jugadores...", color = Color.White)
             }
         }
     }
