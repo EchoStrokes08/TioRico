@@ -9,5 +9,6 @@ data class LobbyUiState(
     val isHost: Boolean = false,
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
-    val navigateToGame: Boolean = false
+    val navigateToGame: Boolean = false,
+    val playerId: String = ""
 )

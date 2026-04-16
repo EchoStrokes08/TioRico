@@ -40,6 +40,8 @@ data class GameUiState(
 class GameViewModel(
     private val repository: GameRepository = GameRepository()
 ) : ViewModel() {
+    private var isProcessingTurn = false
+    private var isInitialized = false
 
     private val _uiState = MutableStateFlow(GameUiState())
     val uiState: StateFlow<GameUiState> = _uiState.asStateFlow()
@@ -61,8 +63,15 @@ class GameViewModel(
     // ════════════════════════════════════════════════════════════════════════
 
     fun initialize(gameId: String, playerId: String) {
+
+        if (isInitialized) return   // 🔥 EVITA DOBLE INIT
+        isInitialized = true
+
         this.gameId   = gameId
         this.playerId = playerId
+
+        createFirstTurnIfNeeded()
+
         observeGame()
         observePlayers()
         observeChat()
@@ -76,7 +85,15 @@ class GameViewModel(
     private fun observeGame() {
         viewModelScope.launch {
             repository.observeGame(gameId).collect { game ->
-                _uiState.update { it.copy(game = game, isLoading = false) }
+
+                if (game == null) return@collect
+
+                _uiState.update {
+                    it.copy(
+                        game = game,
+                        isLoading = false
+                    )
+                }
             }
         }
     }
@@ -100,7 +117,14 @@ class GameViewModel(
 
                 // ► UseCase: ¿todos los jugadores activos ya jugaron?
                 val todosListos = everyoneIsReady.execute(players)
-                if (todosListos && players.isNotEmpty()) {
+
+                if (
+                    todosListos &&
+                    players.size > 1 &&   // 🔥 CLAVE
+                    gameId.isNotBlank() &&
+                    !isProcessingTurn
+                ) {
+                    isProcessingTurn = true
                     processTurnEnd()
                 }
             }
@@ -127,7 +151,8 @@ class GameViewModel(
 
         // Guarda de seguridad: no puede jugar si está eliminado
         if (!player.active) return
-
+        val turnId = _uiState.value.currentTurnId
+        if (turnId.isBlank()) return
         viewModelScope.launch {
 
             // ► UseCase: marca al jugador como "done" y guarda la acción
@@ -166,53 +191,56 @@ class GameViewModel(
     // ════════════════════════════════════════════════════════════════════════
 
     private fun processTurnEnd() {
-        // Solo el host resuelve el turno para evitar que todos escriban a la vez
-        val isHost = _uiState.value.players
-            .minByOrNull { it.name }?.id == playerId  // el primero alfabéticamente es el "host"
 
-        if (!isHost) return
-
-        val game    = _uiState.value.game    ?: return
+        val game = _uiState.value.game ?: return
         val players = _uiState.value.players
 
+        if (players.isEmpty()) return
+
+        val isHost = players.firstOrNull()?.id == playerId
+        if (!isHost) return
+
         viewModelScope.launch {
+            try {
 
-            // ► UseCase: calcula el nuevo cash de cada jugador según su acción
-            val turnResult = resolveTurn.execute(
-                players     = players,
-                currentTurn = game.actualTurn,
-                maxTurns    = game.maxTurns
-            )
-
-            // ► Repository: actualiza cada jugador en Firestore
-            turnResult.updatedPlayers.forEach { player ->
-                repository.updatePlayer(
-                    gameId     = gameId,
-                    playerId   = player.id,
-                    newCash    = player.cash,
-                    lastAction = player.lastAction ?: "",
-                    active     = player.active
+                val turnResult = resolveTurn.execute(
+                    players = players,
+                    currentTurn = game.actualTurn,
+                    maxTurns = game.maxTurns
                 )
+
+                turnResult.updatedPlayers.forEach { player ->
+                    repository.updatePlayer(
+                        gameId = gameId,
+                        playerId = player.id,
+                        newCash = player.cash,
+                        lastAction = player.lastAction ?: "",
+                        active = player.active
+                    )
+                }
+
+                val updatedGame = verifyGame.execute(game, turnResult.updatedPlayers)
+
+                if (updatedGame.status == "FINALIZADO") {
+                    repository.updateGameStatus(gameId, "FINALIZADO")
+                    _uiState.update { it.copy(navigateToResult = true) }
+                    return@launch
+                }
+
+                val nextTurn = game.actualTurn + 1
+
+                val turnResult2 = repository.createTurn(gameId, nextTurn)
+
+                if (turnResult2 is DataResult.Success) {
+                    _uiState.update { it.copy(currentTurnId = turnResult2.data) }
+                }
+
+                repository.resetDoneFlags(gameId)
+                repository.advanceTurn(gameId, nextTurn)
+
+            } finally {
+                isProcessingTurn = false   // 🔥 AQUÍ ES DONDE VA
             }
-
-            // ► UseCase: ¿terminó el juego?
-            val updatedGame = verifyGame.execute(game, turnResult.updatedPlayers)
-
-            if (updatedGame.status == "FINALIZADO") {
-                repository.updateGameStatus(gameId, "FINALIZADO")
-                _uiState.update { it.copy(navigateToResult = true) }
-                return@launch
-            }
-
-            // ► Siguiente turno: crear documento del turno y resetear flags
-            val nextTurn = game.actualTurn + 1
-            val turnResult2 = repository.createTurn(gameId, nextTurn)
-            if (turnResult2 is DataResult.Success) {
-                _uiState.update { it.copy(currentTurnId = turnResult2.data) }
-            }
-
-            repository.resetDoneFlags(gameId)
-            repository.advanceTurn(gameId, nextTurn)
         }
     }
 
@@ -248,5 +276,21 @@ class GameViewModel(
 
     fun clearError() {
         _uiState.update { it.copy(errorMessage = null) }
+    }
+
+    private fun createFirstTurnIfNeeded() {
+        viewModelScope.launch {
+
+            val players = _uiState.value.players
+            val isHost = players.firstOrNull()?.id == playerId
+
+            if (!isHost) return@launch
+
+            val result = repository.createTurn(gameId, 1)
+
+            if (result is DataResult.Success) {
+                _uiState.update { it.copy(currentTurnId = result.data) }
+            }
+        }
     }
 }

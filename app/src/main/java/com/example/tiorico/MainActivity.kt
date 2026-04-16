@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import com.example.tiorico.data.models.AuthUiState
 import com.example.tiorico.ui.Views.*
 import com.example.tiorico.ui.auth.AuthViewModel
 import com.example.tiorico.ui.auth.RegisterViewModel
@@ -31,11 +32,16 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         setContent {
+
             TioRicoTheme {
 
                 var currentScreen by remember { mutableStateOf("login") }
 
-                // 🔥 Eventos de Auth (login exitoso)
+                // 🔥 IDs DE PARTIDA
+                var gameId by remember { mutableStateOf("") }
+                var playerId by remember { mutableStateOf("") }
+
+                // 🔥 Eventos de Auth
                 LaunchedEffect(Unit) {
                     authViewModel.eventFlow.collectLatest { event ->
                         when (event) {
@@ -47,9 +53,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                Scaffold(
-                    modifier = Modifier.fillMaxSize()
-                ) { innerPadding ->
+                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                    val authState = authViewModel.uiState.collectAsState().value
 
                     when (currentScreen) {
 
@@ -58,10 +63,13 @@ class MainActivity : ComponentActivity() {
                             LoginScreen(
                                 viewModel = authViewModel,
                                 onRegisterClick = {
-                                    currentScreen = "register" // 🔥 ir a registro
+                                    currentScreen = "register"
                                 },
                                 onGoToLobby = {
-                                    currentScreen = "lobby" // debug
+                                    val user = authViewModel.uiState.value
+                                    if (user is AuthUiState.Success) {
+                                        currentScreen = "lobby"
+                                    }
                                 }
                             )
                         }
@@ -88,14 +96,29 @@ class MainActivity : ComponentActivity() {
 
                             LobbyScreen(
                                 viewModel = lobbyViewModel,
-                                onNavigateToGame = {
+                                onNavigateToGame = { roomCode, playerIdValue ->
+
+                                    gameId = roomCode
+                                    playerId = playerIdValue
+
                                     currentScreen = "game"
+                                },
+                                onExit = {
+                                    currentScreen = "login" // 🔥 AQUÍ ESTÁ LA CLAVE
                                 }
                             )
                         }
 
                         // 🎮 GAME
                         "game" -> {
+
+                            // 🔥 IMPORTANTE: inicializar solo cuando cambia el room
+                            LaunchedEffect(gameId, playerId) {
+                                if (gameId.isBlank() || playerId.isBlank()) return@LaunchedEffect
+
+                                gameViewModel.initialize(gameId, playerId)
+                            }
+
                             Box(modifier = Modifier.padding(innerPadding)) {
                                 GameScreen(
                                     viewModel = gameViewModel,
@@ -111,4 +134,3 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-

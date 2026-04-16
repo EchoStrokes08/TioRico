@@ -13,7 +13,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
 class LobbyViewModel : ViewModel() {
-
+    private var lastCreatedGameId: String = ""
     private val repository = LobbyRepository()
 
     private val _uiState = MutableStateFlow(LobbyUiState())
@@ -25,24 +25,18 @@ class LobbyViewModel : ViewModel() {
     fun loadUserName() {
         viewModelScope.launch {
             try {
-                val userId = FirebaseAuth.getInstance().currentUser?.uid
-
-                if (userId.isNullOrEmpty()) {
-                    _uiState.value = _uiState.value.copy(
-                        errorMessage = "Usuario no autenticado"
-                    )
-                    return@launch
-                }
+                val auth = FirebaseAuth.getInstance()
+                val user = auth.currentUser ?: return@launch
 
                 val db = FirebaseDatabase.getInstance().reference
 
                 val snapshot = db.child("users")
-                    .child(userId)
+                    .child(user.uid)
                     .get()
                     .await()
 
                 val username = snapshot.child("username")
-                    .getValue(String::class.java) ?: ""
+                    .getValue(String::class.java) ?: user.email ?: "Jugador"
 
                 _uiState.value = _uiState.value.copy(
                     playerName = username
@@ -50,7 +44,7 @@ class LobbyViewModel : ViewModel() {
 
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
-                    errorMessage = e.message ?: "Error cargando usuario"
+                    playerName = FirebaseAuth.getInstance().currentUser?.email ?: "Jugador"
                 )
             }
         }
@@ -78,14 +72,17 @@ class LobbyViewModel : ViewModel() {
             val result = repository.createGame(name)
 
             if (result.isSuccess) {
-                currentRoomCode = result.getOrNull() ?: ""
+                val (roomCode, playerId) = result.getOrNull()!!
 
-                listenRoom()
+                currentRoomCode = roomCode
+
+                listenRoom(roomCode)
 
                 _uiState.value = _uiState.value.copy(
                     isHost = true,
                     isLoading = false,
-                    roomCode = currentRoomCode
+                    roomCode = roomCode,
+                    playerId = playerId   // 🔥 NUEVO
                 )
             } else {
                 _uiState.value = _uiState.value.copy(
@@ -116,13 +113,16 @@ class LobbyViewModel : ViewModel() {
             val result = repository.joinGame(roomCode, name)
 
             if (result.isSuccess) {
+                val playerId = result.getOrNull()!!
+
                 currentRoomCode = roomCode
 
-                listenRoom()
+                listenRoom(roomCode)
 
                 _uiState.value = _uiState.value.copy(
-                    players = result.getOrNull() ?: emptyList(),
-                    isLoading = false
+                    isLoading = false,
+                    playerId = playerId,  // 🔥 NUEVO
+                    roomCode = roomCode
                 )
             } else {
                 _uiState.value = _uiState.value.copy(
@@ -133,26 +133,40 @@ class LobbyViewModel : ViewModel() {
         }
     }
 
-    private fun listenRoom() {
-        repository.listenPlayers(currentRoomCode) { players ->
+    fun listenRoom(roomCode: String) {
+        repository.listenPlayers(roomCode) { players ->
             _uiState.value = _uiState.value.copy(players = players)
         }
 
-        repository.listenGameStart(currentRoomCode) {
-            _uiState.value = _uiState.value.copy(navigateToGame = true)
+        repository.listenGameStart(roomCode) {
+            if (!_uiState.value.navigateToGame) {
+                _uiState.value = _uiState.value.copy(
+                    navigateToGame = true
+                )
+            }
         }
     }
 
     fun startGame() {
         viewModelScope.launch {
-            val result = repository.startGame(currentRoomCode)
+            val roomCode = _uiState.value.roomCode
+
+            println("🔥 START GAME CLICKED")
+            println("ROOM CODE UI: $roomCode")
+
+            if (roomCode.isBlank()) {
+                _uiState.value = _uiState.value.copy(
+                    errorMessage = "RoomCode vacío"
+                )
+                return@launch
+            }
+
+            val result = repository.startGame(roomCode)
 
             if (result.isSuccess) {
-                _uiState.value = _uiState.value.copy(navigateToGame = true)
+                println("✅ START GAME OK")
             } else {
-                _uiState.value = _uiState.value.copy(
-                    errorMessage = result.exceptionOrNull()?.message
-                )
+                println("❌ ERROR: ${result.exceptionOrNull()}")
             }
         }
     }

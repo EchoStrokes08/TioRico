@@ -132,18 +132,6 @@ fun LoginScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    Button(
-                        onClick = onGoToLobby,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color.Green
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Ir al Lobby (Debug)", color = Color.Black)
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
                     OutlinedButton(
                         onClick = onRegisterClick,
                         modifier = Modifier.fillMaxWidth()
@@ -157,7 +145,7 @@ fun LoginScreen(
                     }
                 }
 
-                // 🔥 Overlay de carga (igual que arquitectura ejemplo)
+                // Overlay de carga
                 if (isLoading) {
                     Box(
                         modifier = Modifier

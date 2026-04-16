@@ -1,19 +1,36 @@
 package com.example.tiorico.ui.Views
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.tiorico.data.models.ActionDocument
 import com.example.tiorico.ui.game.GameViewModel
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.example.tiorico.R
+
 
 @Composable
 fun GameScreen(
@@ -25,7 +42,6 @@ fun GameScreen(
     val player = state.currentPlayer
     val game = state.game
 
-    // 🚀 navegación a resultados
     LaunchedEffect(state.navigateToResult) {
         if (state.navigateToResult) {
             onFinishGame()
@@ -33,7 +49,6 @@ fun GameScreen(
         }
     }
 
-    // ⛔ loading inicial
     if (state.isLoading || player == null || game == null) {
         Box(
             modifier = Modifier
@@ -41,7 +56,7 @@ fun GameScreen(
                 .background(Color.Black),
             contentAlignment = Alignment.Center
         ) {
-            Text("Cargando partida...", color = Color.White)
+            CircularProgressIndicator(color = Color.Yellow)
         }
         return
     }
@@ -49,83 +64,136 @@ fun GameScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0D47A1)),
-        contentAlignment = Alignment.Center
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF010570),
+                        Color(0xFF0105FF),
+                        Color(0xFF010570)
+                    )
+                )
+            )
     ) {
 
         Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
 
-            Text("TÍO RICO", fontSize = 32.sp, color = Color.Yellow)
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 💰 DINERO REAL DEL PLAYER
-            Text("Dinero: $${player.cash}", color = Color.White)
-
-            // 🔁 TURNO REAL DEL JUEGO
-            Text("Turno: ${game.actualTurn} / ${game.maxTurns}", color = Color.White)
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 🎲 ÚLTIMO EVENTO
-            Text(
-                state.lastEvent?.description ?: "Esperando evento...",
-                color = Color.Green
+            //  LOGO (igual que login)
+            Image(
+                painter = painterResource(id = R.drawable.logo_tiorico),
+                contentDescription = "Logo",
+                modifier = Modifier
+                    .fillMaxWidth(0.7f)
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
-            // 🚫 DESACTIVAR SI YA JUGÓ
-            val canPlay = player.active && player.lastAction.isNullOrBlank()
-
-            Button(
-                onClick = {
-                    viewModel.playAction(
-                        ActionDocument(type = "AHORRAR")
-                    )
-                },
-                enabled = canPlay,
-                modifier = Modifier.fillMaxWidth(0.7f)
+            //  CARD PRINCIPAL
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = Color(0xFF0D47A1).copy(alpha = 0.85f)
+                ),
+                elevation = CardDefaults.cardElevation(8.dp)
             ) {
-                Text("Ahorrar")
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+
+                    Text(
+                        text = "$${player.cash}",
+                        fontSize = 28.sp,
+                        color = Color.Yellow
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Text(
+                        "Turno ${game.actualTurn} / ${game.maxTurns}",
+                        color = Color.White
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(
+                        state.lastEvent?.description ?: "Sin eventos este turno",
+                        color = Color(0xFFB2FF59),
+                        fontSize = 14.sp
+                    )
+                }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(30.dp))
 
-            Button(
-                onClick = {
-                    viewModel.playAction(
-                        ActionDocument(type = "INVERTIR")
-                    )
-                },
-                enabled = canPlay,
-                modifier = Modifier.fillMaxWidth(0.7f)
+            val canPlay = player.active && player.done == false
+
+            // 🎮 BOTONES DE ACCIÓN
+            Column(
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxWidth(0.85f)
             ) {
-                Text("Invertir")
+
+                Button(
+                    onClick = {
+                        viewModel.playAction(ActionDocument(type = "AHORRAR"))
+                    },
+                    enabled = canPlay,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(55.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF00C853)
+                    )
+                ) {
+                    Text("Ahorrar ", fontSize = 16.sp)
+                }
+
+                Button(
+                    onClick = {
+                        viewModel.playAction(ActionDocument(type = "INVERTIR"))
+                    },
+                    enabled = canPlay,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(55.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF2962FF)
+                    )
+                ) {
+                    Text("Invertir ", fontSize = 16.sp)
+                }
+
+                Button(
+                    onClick = {
+                        viewModel.playAction(ActionDocument(type = "GASTAR"))
+                    },
+                    enabled = canPlay,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(55.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFD50000)
+                    )
+                ) {
+                    Text("Gastar ", fontSize = 16.sp)
+                }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(25.dp))
 
-            Button(
-                onClick = {
-                    viewModel.playAction(
-                        ActionDocument(type = "GASTAR")
-                    )
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
-                enabled = canPlay,
-                modifier = Modifier.fillMaxWidth(0.7f)
-            ) {
-                Text("Gastar")
-            }
-
-            // ⏳ feedback cuando ya jugó
             if (!canPlay) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Text("Esperando a otros jugadores...", color = Color.White)
+                Text(
+                    "Esperando a otros jugadores...",
+                    color = Color.White,
+                    fontSize = 14.sp
+                )
             }
         }
     }
 }
+

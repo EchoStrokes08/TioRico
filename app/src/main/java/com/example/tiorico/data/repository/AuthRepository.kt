@@ -4,7 +4,7 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.tasks.await
-
+import com.google.firebase.auth.FirebaseUser
 class AuthRepository {
 
     private val auth: FirebaseAuth = Firebase.auth
@@ -33,8 +33,9 @@ class AuthRepository {
         auth.signOut()
     }
 
-    fun getCurrentUser(): String? {
-        return auth.currentUser?.email
+
+    fun getCurrentUser(): FirebaseUser? {
+        return FirebaseAuth.getInstance().currentUser
     }
     suspend fun getUserData(): Pair<String, String> {
         val user = FirebaseAuth.getInstance().currentUser
@@ -53,4 +54,5 @@ class AuthRepository {
 
         return Pair(userId, username)
     }
+
 }

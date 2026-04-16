@@ -43,7 +43,7 @@ fun RegisterScreen(
 
     val state by viewModel.uiState.collectAsState()
 
-    // 🔥 Navegación automática
+    // Navegación automática
     LaunchedEffect(state.success) {
         if (state.success) {
             onRegisterSuccess()

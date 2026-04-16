@@ -30,8 +30,16 @@ class AuthViewModel : ViewModel() {
                 val user = repository.getCurrentUser()
 
                 if (user != null) {
-                    val (userId, username) = repository.getUserData()
-                    _uiState.value = AuthUiState.Success(userId, username)
+
+                    // ⚠️ no bloquear UI con DB sync pesado
+                    val userId = user.uid
+
+                    _uiState.value = AuthUiState.Success(
+                        userId = userId,
+                        username = ""
+                    )
+
+                    _eventFlow.emit(UiEvent.NavigateToHome)
                 }
 
             } catch (e: Exception) {
@@ -91,6 +99,8 @@ class AuthViewModel : ViewModel() {
         repository.logout()
         _uiState.value = AuthUiState.Idle
     }
+
+
 
     sealed class UiEvent {
         object NavigateToHome : UiEvent()
