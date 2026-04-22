@@ -1,13 +1,13 @@
 package com.example.tiorico.data.repository
 
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.database.FirebaseDatabase
 import kotlinx.coroutines.tasks.await
+import com.google.firebase.firestore.FirebaseFirestore
 
 class RegisterRepository {
 
     private val auth = FirebaseAuth.getInstance()
-    private val db = FirebaseDatabase.getInstance().reference
+    private val db = FirebaseFirestore.getInstance()
 
     suspend fun register(
         username: String,
@@ -24,7 +24,10 @@ class RegisterRepository {
                 "email" to email
             )
 
-            db.child("users").child(uid).setValue(userMap).await()
+            db.collection("users")
+                .document(uid)
+                .set(userMap)
+                .await()
 
             Result.success(Unit)
 

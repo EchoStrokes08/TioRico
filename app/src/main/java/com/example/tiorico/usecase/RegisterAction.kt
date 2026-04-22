@@ -1,15 +1,15 @@
 package com.example.tiorico.usecase
 
+import com.example.tiorico.data.models.Player
 import com.example.tiorico.data.models.ActionDocument
-import com.example.tiorico.data.models.PlayerDocument
 
 class RegisterAction {
     fun execute(
-        player: PlayerDocument,
+        player: Player,
         action: ActionDocument
-    ): PlayerDocument {
+    ): Player {
         return player.copy(
-            lastAction = action.type,  // enum → String para Firestore
+            lastAction = action.type,
             done = true
         )
     }

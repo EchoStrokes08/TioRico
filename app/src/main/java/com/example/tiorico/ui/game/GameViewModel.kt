@@ -2,136 +2,133 @@ package com.example.tiorico.ui.game
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.tiorico.data.models.*
+import com.example.tiorico.data.models.ActionDocument
+import com.example.tiorico.data.models.ChatDocument
 import com.example.tiorico.data.repository.DataResult
+import com.example.tiorico.data.models.GameUiState
+import com.example.tiorico.data.models.Player
 import com.example.tiorico.data.repository.GameRepository
-import com.example.tiorico.usecase.*
+import com.example.tiorico.usecase.ApplyEvent
+import com.example.tiorico.usecase.ResolveTurn
+import com.example.tiorico.usecase.VerifyGame
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// GameViewModel
-//
-// Responsabilidad: todo lo que pasa DURANTE el juego.
-//   - El jugador elige su acción (AHORRAR, INVERTIR, GASTAR)
-//   - Cuando todos jugaron → resuelve el turno
-//   - Aplica eventos aleatorios
-//   - Verifica si el juego terminó
-//   - Maneja el chat
-//
-// Recibe gameId y playerId desde LobbyViewModel via navigation arguments.
-// ═══════════════════════════════════════════════════════════════════════════════
+class GameViewModel : ViewModel() {
 
-data class GameUiState(
-    val game: GameDocument?              = null,
-    val players: List<PlayerDocument>    = emptyList(),
-    val chat: List<ChatDocument>         = emptyList(),
-    val currentTurnId: String            = "",
-    val currentPlayer: PlayerDocument?   = null,  // el jugador local
-    val lastEvent: EventDocument?        = null,  // evento del turno actual
-    val isLoading: Boolean               = true,
-    val errorMessage: String?            = null,
-    val navigateToResult: Boolean        = false  // señal para ir a resultados
-)
-
-class GameViewModel(
-    private val repository: GameRepository = GameRepository()
-) : ViewModel() {
-    private var isProcessingTurn = false
-    private var isInitialized = false
+    private val repository = GameRepository()
+    private val resolveTurn = ResolveTurn()
+    private val applyEvent = ApplyEvent()
+    private val verifyGame = VerifyGame()
 
     private val _uiState = MutableStateFlow(GameUiState())
-    val uiState: StateFlow<GameUiState> = _uiState.asStateFlow()
+    val uiState = _uiState.asStateFlow()
 
-    // UseCases
-    private val everyoneIsReady  = EveryoneIsReady()
-    private val registerAction   = RegisterAction()
-    private val resolveTurn      = ResolveTurn()
-    private val verifyGame       = VerifyGame()
+    private var gameId: String = ""
+    private var playerId: String = ""
 
-    // IDs de sesión — se setean al inicializar
-    private var gameId   = ""
-    private var playerId = ""
+    private var isInitialized = false
+    private var firstTurnCreated = false
+    private var turnLock = false
+    private var isProcessingTurn = false
 
+    private var lastProcessedTurnId = ""
+    private var lastTurn = -1
 
-    // ════════════════════════════════════════════════════════════════════════
-    // INICIALIZAR
-    // Llamar desde GameFragment.onViewCreated() con los args de navegación
-    // ════════════════════════════════════════════════════════════════════════
+    private var eventsJob: Job? = null
 
     fun initialize(gameId: String, playerId: String) {
-
-        if (isInitialized) return   // 🔥 EVITA DOBLE INIT
-        isInitialized = true
-
-        this.gameId   = gameId
+        if (isInitialized && this.gameId == gameId && this.playerId == playerId) return
+        
+        clearState()
+        
+        this.gameId = gameId
         this.playerId = playerId
-
-        createFirstTurnIfNeeded()
+        isInitialized = true
 
         observeGame()
         observePlayers()
+        observeTurns()
         observeChat()
+        createFirstTurnIfHost()
     }
 
-
-    // ════════════════════════════════════════════════════════════════════════
-    // OBSERVADORES
-    // ════════════════════════════════════════════════════════════════════════
-
     private fun observeGame() {
+        if (gameId.isBlank()) return
         viewModelScope.launch {
             repository.observeGame(gameId).collect { game ->
-
-                if (game == null) return@collect
-
-                _uiState.update {
-                    it.copy(
-                        game = game,
-                        isLoading = false
-                    )
+                if (game != null) {
+                    _uiState.update {
+                        it.copy(
+                            game = game,
+                            isLoading = false,
+                            showTurnMessage = game.actualTurn > lastTurn && lastTurn != -1,
+                            navigateToResult = game.status == "FINALIZADO"
+                        )
+                    }
+                    if (game.actualTurn > lastTurn) {
+                        lastTurn = game.actualTurn
+                    }
                 }
             }
         }
     }
 
-    // Este es el observer más importante:
-    // Cada vez que un jugador actualiza su "done", Firestore emite la lista nueva.
-    // Aquí verificamos si todos terminaron para resolver el turno.
     private fun observePlayers() {
+        if (gameId.isBlank()) return
         viewModelScope.launch {
             repository.observePlayers(gameId).collect { players ->
-
-                // Actualiza el jugador local
                 val currentPlayer = players.find { it.id == playerId }
-
                 _uiState.update {
                     it.copy(
-                        players       = players,
+                        players = players,
                         currentPlayer = currentPlayer
                     )
                 }
-
-                // ► UseCase: ¿todos los jugadores activos ya jugaron?
-                val todosListos = everyoneIsReady.execute(players)
-
-                if (
-                    todosListos &&
-                    players.size > 1 &&   // 🔥 CLAVE
-                    gameId.isNotBlank() &&
-                    !isProcessingTurn
-                ) {
-                    isProcessingTurn = true
-                    processTurnEnd()
+                // Si somos host, cada vez que cambien los jugadores checamos si ya terminaron todos
+                val currentTurnId = _uiState.value.currentTurnId
+                if (currentTurnId.isNotBlank()) {
+                    checkAndResolveTurn(currentTurnId)
                 }
+            }
+        }
+    }
+
+    private fun observeTurns() {
+        if (gameId.isBlank()) return
+        viewModelScope.launch {
+            repository.observeCurrentTurn(gameId).collect { turn ->
+                if (turn != null) {
+                    _uiState.update { it.copy(currentTurnId = turn.id) }
+                    
+                    if (turn.status == "WAITING") {
+                        checkAndResolveTurn(turn.id)
+                    }
+                    
+                    if (turn.id != lastProcessedTurnId) {
+                        observeEvents(turn.id)
+                        lastProcessedTurnId = turn.id
+                    }
+                }
+            }
+        }
+    }
+
+    private fun observeEvents(turnId: String) {
+        eventsJob?.cancel()
+        eventsJob = viewModelScope.launch {
+            repository.observeEvents(gameId, turnId, playerId).collect { events ->
+                _uiState.update { it.copy(lastEvent = events.lastOrNull()) }
             }
         }
     }
 
     private fun observeChat() {
+        if (gameId.isBlank()) return
         viewModelScope.launch {
             repository.observeChat(gameId).collect { messages ->
                 _uiState.update { it.copy(chat = messages) }
@@ -139,77 +136,92 @@ class GameViewModel(
         }
     }
 
-
-    // ════════════════════════════════════════════════════════════════════════
-    // ACCIÓN DEL JUGADOR
-    // Llamar cuando el jugador toca AHORRAR, INVERTIR o GASTAR
-    // ════════════════════════════════════════════════════════════════════════
-
-    fun playAction(action: ActionDocument) {
-        val player = _uiState.value.currentPlayer ?: return
-        val game   = _uiState.value.game          ?: return
-
-        // Guarda de seguridad: no puede jugar si está eliminado
-        if (!player.active) return
-        val turnId = _uiState.value.currentTurnId
-        if (turnId.isBlank()) return
+    fun sendMessage(text: String) {
+        if (text.isBlank() || gameId.isBlank()) return
         viewModelScope.launch {
-
-            // ► UseCase: marca al jugador como "done" y guarda la acción
-            val updatedPlayer = registerAction.execute(player, action)
-
-            // ► Repository: actualiza el jugador en Firestore
-            // Esto dispara el observer de todos los dispositivos
-            repository.updatePlayer(
-                gameId   = gameId,
-                playerId = playerId,
-                newCash  = updatedPlayer.cash,
-                lastAction = updatedPlayer.lastAction ?: "",
-                active   = updatedPlayer.active
+            val senderName = _uiState.value.currentPlayer?.name ?: "Jugador"
+            val message = ChatDocument(
+                senderId = playerId,
+                senderName = senderName,
+                message = text
             )
-
-            // ► Repository: guarda la acción en el historial del turno
-            repository.saveAction(
-                gameId  = gameId,
-                turnId  = _uiState.value.currentTurnId,
-                action  = ActionDocument(
-                    playerId   = playerId,
-                    playerName = player.name,
-                    type       = action.type,
-                    cashBefore = player.cash,
-                    cashAfter  = updatedPlayer.cash
-                )
-            )
+            repository.sendMessage(gameId, message)
         }
     }
 
-
-    // ════════════════════════════════════════════════════════════════════════
-    // FIN DE TURNO
-    // Se llama automáticamente desde observePlayers() cuando todos jugaron
-    // Solo el host lo ejecuta para evitar escrituras duplicadas en Firestore
-    // ════════════════════════════════════════════════════════════════════════
-
-    private fun processTurnEnd() {
-
-        val game = _uiState.value.game ?: return
-        val players = _uiState.value.players
-
-        if (players.isEmpty()) return
-
-        val isHost = players.firstOrNull()?.id == playerId
-        if (!isHost) return
+    fun playAction(action: ActionDocument) {
+        val state = _uiState.value
+        val turnId = state.currentTurnId
+        if (turnId.isBlank()) return
 
         viewModelScope.launch {
-            try {
+            val actionToSave = action.copy(
+                playerId = playerId,
+                playerName = state.currentPlayer?.name ?: "",
+                cashBefore = state.currentPlayer?.cash ?: 0.0
+            )
+            repository.saveAction(gameId, turnId, actionToSave)
+
+            // IMPORTANTE: Marcamos al jugador como "listo" (done = true)
+            // y guardamos su última acción para que el ResolveTurn sepa qué procesar.
+            state.currentPlayer?.let { p ->
+                repository.updatePlayer(
+                    gameId = gameId,
+                    playerId = playerId,
+                    newCash = p.cash,
+                    lastAction = action.type,
+                    active = p.active
+                )
+            }
+        }
+    }
+
+    private fun checkAndResolveTurn(turnId: String) {
+        if (turnLock || isProcessingTurn) return
+        
+        viewModelScope.launch {
+            val players = _uiState.value.players
+            val game = _uiState.value.game ?: return@launch
+            val me = players.find { it.id == playerId }
+
+            if (me?.isHost != true) return@launch
+
+            val activos = players.count { it.active }
+            val listos = players.count { it.active && it.done }
+
+            if (listos >= activos && activos > 0) {
+                turnLock = true
+                isProcessingTurn = true
+
+                val lockResult = repository.updateTurnStatus(gameId, turnId, "PROCESSING")
+                if (lockResult is DataResult.Error) {
+                    turnLock = false
+                    isProcessingTurn = false
+                    return@launch
+                }
+
+                val actionsResult = repository.getActions(gameId, turnId)
+                val actions = (actionsResult as? DataResult.Success)?.data ?: emptyList()
 
                 val turnResult = resolveTurn.execute(
                     players = players,
                     currentTurn = game.actualTurn,
                     maxTurns = game.maxTurns
                 )
+                
+                val (playersWithEvent, events) = applyEvent.execute(
+                    players = turnResult.updatedPlayers,
+                    currentTurn = game.actualTurn,
+                    maxTurns = game.maxTurns
+                )
 
-                turnResult.updatedPlayers.forEach { player ->
+                if (events != null) {
+                    events.forEach { event ->
+                        repository.saveEvent(gameId, turnId, event)
+                    }
+                }
+
+                playersWithEvent.forEach { player ->
                     repository.updatePlayer(
                         gameId = gameId,
                         playerId = player.id,
@@ -219,77 +231,77 @@ class GameViewModel(
                     )
                 }
 
-                val updatedGame = verifyGame.execute(game, turnResult.updatedPlayers)
-
+                val updatedGame = verifyGame.execute(game, playersWithEvent)
+                
                 if (updatedGame.status == "FINALIZADO") {
                     repository.updateGameStatus(gameId, "FINALIZADO")
-                    _uiState.update { it.copy(navigateToResult = true) }
-                    return@launch
+                } else {
+                    val nextTurn = turnResult.nextTurn
+                    repository.advanceTurn(gameId, nextTurn)
+                    repository.createTurn(gameId, nextTurn)
+                    repository.resetDoneFlags(gameId)
                 }
 
-                val nextTurn = game.actualTurn + 1
-
-                val turnResult2 = repository.createTurn(gameId, nextTurn)
-
-                if (turnResult2 is DataResult.Success) {
-                    _uiState.update { it.copy(currentTurnId = turnResult2.data) }
-                }
-
-                repository.resetDoneFlags(gameId)
-                repository.advanceTurn(gameId, nextTurn)
-
-            } finally {
-                isProcessingTurn = false   // 🔥 AQUÍ ES DONDE VA
+                repository.updateTurnStatus(gameId, turnId, "RESOLVED")
+                
+                isProcessingTurn = false
+                turnLock = false
             }
         }
     }
 
-
-    // ════════════════════════════════════════════════════════════════════════
-    // CHAT
-    // ════════════════════════════════════════════════════════════════════════
-
-    fun sendMessage(text: String) {
-        val player = _uiState.value.currentPlayer ?: return
-        if (text.isBlank()) return
-
-        viewModelScope.launch {
-            repository.sendMessage(
-                gameId  = gameId,
-                message = ChatDocument(
-                    senderId   = playerId,
-                    senderName = player.name,
-                    message    = text.trim()
-                )
-            )
-        }
+    fun clearState() {
+        isInitialized = false
+        firstTurnCreated = false
+        turnLock = false
+        isProcessingTurn = false
+        lastProcessedTurnId = ""
+        gameId = ""
+        playerId = ""
+        lastTurn = -1
+        eventsJob?.cancel()
+        _uiState.value = GameUiState()
     }
 
-
-    // ════════════════════════════════════════════════════════════════════════
-    // LIMPIEZA
-    // ════════════════════════════════════════════════════════════════════════
-
-    fun onNavigatedToResult() {
-        _uiState.update { it.copy(navigateToResult = false) }
+    fun leaveGame(onDone: () -> Unit) {
+        viewModelScope.launch {
+            if (gameId.isNotBlank() && playerId.isNotBlank()) {
+                repository.updatePlayer(gameId, playerId, 0.0, "SALIO", false)
+            }
+            clearState()
+            onDone()
+        }
     }
 
     fun clearError() {
         _uiState.update { it.copy(errorMessage = null) }
     }
 
-    private fun createFirstTurnIfNeeded() {
+    fun hideTurnMessage() {
+        _uiState.update { it.copy(showTurnMessage = false) }
+    }
+
+    fun onNavigatedToResult() {
+        _uiState.update { it.copy(navigateToResult = false) }
+    }
+
+    private fun createFirstTurnIfHost() {
         viewModelScope.launch {
+            repository.observePlayers(gameId).collect { list ->
+                val me = list.firstOrNull { it.id == playerId }
+                val amIHost = me?.isHost == true
 
-            val players = _uiState.value.players
-            val isHost = players.firstOrNull()?.id == playerId
+                if (!amIHost || firstTurnCreated) return@collect
 
-            if (!isHost) return@launch
+                firstTurnCreated = true
+                val result = repository.createTurn(gameId, 1)
 
-            val result = repository.createTurn(gameId, 1)
-
-            if (result is DataResult.Success) {
-                _uiState.update { it.copy(currentTurnId = result.data) }
+                if (result is DataResult.Success) {
+                    _uiState.update {
+                        it.copy(currentTurnId = result.data)
+                    }
+                }
+                cancel()
             }
         }
     }

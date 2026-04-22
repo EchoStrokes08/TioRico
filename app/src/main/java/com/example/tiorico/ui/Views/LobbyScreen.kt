@@ -3,7 +3,6 @@ package com.example.tiorico.ui.Views
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -14,26 +13,26 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.tiorico.ui.components.ChatComponent
 import com.example.tiorico.ui.lobby.LobbyViewModel
-import com.google.firebase.auth.FirebaseAuth
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LobbyScreen(
     viewModel: LobbyViewModel,
     onNavigateToGame: (String, String) -> Unit,
-    onExit: () -> Unit // 🔥 nuevo callback para volver a login
+    onExit: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
 
     LaunchedEffect(state.navigateToGame) {
         if (state.navigateToGame && state.playerId.isNotBlank()) {
-            onNavigateToGame(state.roomCode, state.playerId)
+            onNavigateToGame(state.gameId, state.playerId)
             viewModel.onNavigatedToGame()
         }
     }
 
     Scaffold { innerPadding ->
-
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -48,7 +47,6 @@ fun LobbyScreen(
                     )
                 )
         ) {
-
             //BOTÓN CERRAR SESIÓN (ARRIBA DERECHA)
             Row(
                 modifier = Modifier
@@ -58,7 +56,7 @@ fun LobbyScreen(
             ) {
                 IconButton(
                     onClick = {
-                        FirebaseAuth.getInstance().signOut()
+                        viewModel.onLogout()
                         onExit()
                     }
                 ) {
@@ -68,7 +66,6 @@ fun LobbyScreen(
                         tint = Color.White
                     )
                 }
-
                 Text(
                     text = "Cerrar sesión",
                     color = Color.White,
@@ -81,7 +78,6 @@ fun LobbyScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -90,13 +86,10 @@ fun LobbyScreen(
                         containerColor = Color(0xFF1B5E20).copy(alpha = 0.85f)
                     )
                 ) {
-
                     Column(
                         modifier = Modifier.padding(20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-
-                        // Nombre + Host
                         Text(
                             text = buildString {
                                 append(state.playerName.ifBlank { "Cargando..." })
@@ -106,10 +99,7 @@ fun LobbyScreen(
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold
                         )
-
                         Spacer(modifier = Modifier.height(16.dp))
-
-                        // Código de sala
                         OutlinedTextField(
                             value = state.roomCode,
                             onValueChange = viewModel::onRoomCodeChanged,
@@ -117,20 +107,16 @@ fun LobbyScreen(
                             enabled = !state.isHost,
                             modifier = Modifier.fillMaxWidth()
                         )
-
                         Spacer(modifier = Modifier.height(12.dp))
-
                         Row(modifier = Modifier.fillMaxWidth()) {
-
                             Button(
                                 onClick = { viewModel.joinGame() },
+                                enabled = !state.isLoading,
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Text("Unirse")
                             }
-
                             Spacer(modifier = Modifier.width(8.dp))
-
                             Button(
                                 onClick = { viewModel.createGame() },
                                 modifier = Modifier.weight(1f)
@@ -138,18 +124,14 @@ fun LobbyScreen(
                                 Text("Crear")
                             }
                         }
-
                         Spacer(modifier = Modifier.height(20.dp))
-
                         Text(
                             "Jugadores",
                             fontSize = 22.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
-
                         Spacer(modifier = Modifier.height(10.dp))
-
                         state.players.forEach { player ->
                             Card(
                                 modifier = Modifier
@@ -164,20 +146,20 @@ fun LobbyScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "• ${player.name}",
+                                        text = if (player.active)
+                                            "• ${player.name}"
+                                        else
+                                            "• ${player.name} (Desconectado)",
                                         color = Color.White,
                                         modifier = Modifier.weight(1f)
                                     )
-
-                                    if (player.id == state.playerId && state.isHost) {
+                                    if (player.isHost) {
                                         Text("HOST", color = Color.Yellow)
                                     }
                                 }
                             }
                         }
-
                         Spacer(modifier = Modifier.height(20.dp))
-
                         if (state.isHost) {
                             Button(
                                 onClick = { viewModel.startGame() },
@@ -189,12 +171,10 @@ fun LobbyScreen(
                                 Text("Iniciar Partida")
                             }
                         }
-
                         if (state.isLoading) {
                             Spacer(modifier = Modifier.height(12.dp))
                             CircularProgressIndicator(color = Color.White)
                         }
-
                         state.errorMessage?.let {
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(it, color = Color.Red)
@@ -202,6 +182,10 @@ fun LobbyScreen(
                     }
                 }
             }
+            ChatComponent(
+                messages = state.chat,
+                onSendMessage = { viewModel.sendMessage(it) }
+            )
         }
     }
 }

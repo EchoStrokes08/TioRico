@@ -10,5 +10,7 @@ data class LobbyUiState(
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
     val navigateToGame: Boolean = false,
-    val playerId: String = ""
+    val playerId: String = "",
+    val gameId: String = "",
+    val chat: List<ChatDocument> = emptyList()
 )

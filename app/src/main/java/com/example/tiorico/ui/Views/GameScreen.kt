@@ -26,10 +26,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.tiorico.data.models.ActionDocument
+import com.example.tiorico.ui.components.ChatComponent
 import com.example.tiorico.ui.game.GameViewModel
 import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
 import com.example.tiorico.R
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 
 
 @Composable
@@ -41,6 +44,13 @@ fun GameScreen(
 
     val player = state.currentPlayer
     val game = state.game
+
+    LaunchedEffect(state.showTurnMessage) {
+        if (state.showTurnMessage) {
+            kotlinx.coroutines.delay(2000)
+            viewModel.hideTurnMessage()
+        }
+    }
 
     LaunchedEffect(state.navigateToResult) {
         if (state.navigateToResult) {
@@ -89,6 +99,13 @@ fun GameScreen(
                 modifier = Modifier
                     .fillMaxWidth(0.7f)
             )
+            if (state.showTurnMessage) {
+                Text(
+                    "Nuevo turno!",
+                    color = Color.Green,
+                    fontSize = 18.sp
+                )
+            }
 
             Spacer(modifier = Modifier.height(20.dp))
 
@@ -110,19 +127,59 @@ fun GameScreen(
                         fontSize = 28.sp,
                         color = Color.Yellow
                     )
+                    if (!player.active) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            " Eliminado",
+                            color = Color.Red,
+                            fontSize = 16.sp
+                        )
+                    }
 
                     Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
-                        "Turno ${game.actualTurn} / ${game.maxTurns}",
+                        "Turno ${game.actualTurn} | Meta: $${game.targetCash}",
                         color = Color.White
                     )
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    Text(
-                        state.lastEvent?.description ?: "Sin eventos este turno",
-                        color = Color(0xFFB2FF59),
+                    state.lastEvent?.let { event ->
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color.Black.copy(alpha = 0.2f))
+                                .padding(8.dp)
+                        ) {
+                            Text(
+                                "EVENTO",
+                                color = Color.Yellow,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                event.description,
+                                color = Color(0xFFB2FF59),
+                                fontSize = 16.sp,
+                                textAlign = TextAlign.Center
+                            )
+                            when(event.impact) {
+                                "BONUS" -> Text("Felicidades Ganaste", color = Color.Green)
+                                "LOSS"  -> Text("Te toca pagar", color = Color.Red)
+                                "GIFT"  -> Text("Es momento de incrementar tu dinero", color = Color.Yellow)
+                            }
+                            Text(
+                                event.value.toString(),
+                                color = Color(0xFFB2FF59),
+                                fontSize = 16.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    } ?: Text(
+                        "Sin eventos recientes",
+                        color = Color.White.copy(alpha = 0.6f),
                         fontSize = 14.sp
                     )
                 }
@@ -130,9 +187,9 @@ fun GameScreen(
 
             Spacer(modifier = Modifier.height(30.dp))
 
-            val canPlay = player.active && player.done == false
+            val canPlay = player.active && (player.done == false)
 
-            // 🎮 BOTONES DE ACCIÓN
+            // BOTONES DE ACCIÓN
             Column(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier.fillMaxWidth(0.85f)
@@ -140,6 +197,7 @@ fun GameScreen(
 
                 Button(
                     onClick = {
+                        println("CLICK AHORRAR")
                         viewModel.playAction(ActionDocument(type = "AHORRAR"))
                     },
                     enabled = canPlay,
@@ -147,7 +205,7 @@ fun GameScreen(
                         .fillMaxWidth()
                         .height(55.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF00C853)
+                        containerColor = if (canPlay) Color(0xFF00C853) else Color.Gray
                     )
                 ) {
                     Text("Ahorrar ", fontSize = 16.sp)
@@ -155,6 +213,7 @@ fun GameScreen(
 
                 Button(
                     onClick = {
+
                         viewModel.playAction(ActionDocument(type = "INVERTIR"))
                     },
                     enabled = canPlay,
@@ -162,8 +221,9 @@ fun GameScreen(
                         .fillMaxWidth()
                         .height(55.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF2962FF)
+                        containerColor = if (canPlay) Color(0xFF2962FF) else Color.Gray
                     )
+
                 ) {
                     Text("Invertir ", fontSize = 16.sp)
                 }
@@ -177,7 +237,7 @@ fun GameScreen(
                         .fillMaxWidth()
                         .height(55.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFD50000)
+                        containerColor = if (canPlay) Color(0xFFD50000) else Color.Gray
                     )
                 ) {
                     Text("Gastar ", fontSize = 16.sp)
@@ -186,14 +246,37 @@ fun GameScreen(
 
             Spacer(modifier = Modifier.height(25.dp))
 
-            if (!canPlay) {
+            val faltan = state.players.count { it.active && !it.done }
+
+            if (!canPlay && player.active) {
                 Text(
                     "Esperando a otros jugadores...",
                     color = Color.White,
                     fontSize = 14.sp
                 )
             }
+            if (player.active) {
+                Text(
+                    "Faltan $faltan jugadores",
+                    color = Color.Yellow,
+                    fontSize = 14.sp
+                )
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Button(
+                onClick = onFinishGame,
+                modifier = Modifier.fillMaxWidth(0.6f)
+            ) {
+                Text("Salir")
+            }
         }
+
+        ChatComponent(
+            messages = state.chat,
+            onSendMessage = { viewModel.sendMessage(it) }
+        )
     }
 }
+
 

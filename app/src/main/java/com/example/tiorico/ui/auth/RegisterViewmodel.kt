@@ -52,8 +52,8 @@ class RegisterViewModel : ViewModel() {
             _uiState.value = state.copy(isLoading = true, errorMessage = null)
 
             val result = repository.register(
-                state.username,
-                state.email,
+                state.username.trim(),
+                state.email.lowercase().trim(),
                 state.password
             )
 

@@ -36,12 +36,14 @@ class MainActivity : ComponentActivity() {
             TioRicoTheme {
 
                 var currentScreen by remember { mutableStateOf("login") }
+                var isWinner by remember { mutableStateOf(false) }
+                var finalCash by remember { mutableStateOf(0.0) }
 
-                // 🔥 IDs DE PARTIDA
+                //IDs DE PARTIDA
                 var gameId by remember { mutableStateOf("") }
                 var playerId by remember { mutableStateOf("") }
 
-                // 🔥 Eventos de Auth
+                //Eventos de Auth
                 LaunchedEffect(Unit) {
                     authViewModel.eventFlow.collectLatest { event ->
                         when (event) {
@@ -54,11 +56,9 @@ class MainActivity : ComponentActivity() {
                 }
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    val authState = authViewModel.uiState.collectAsState().value
 
                     when (currentScreen) {
 
-                        // 🔐 LOGIN
                         "login" -> {
                             LoginScreen(
                                 viewModel = authViewModel,
@@ -74,7 +74,7 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
-                        // 📝 REGISTER
+                        //--------------------------------------------------------------------------------------------
                         "register" -> {
                             RegisterScreen(
                                 viewModel = registerViewModel,
@@ -87,32 +87,33 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
-                        // 🟢 LOBBY
+                        //-------------------------------------------------------------------------------------------
                         "lobby" -> {
 
                             LaunchedEffect(Unit) {
+                                lobbyViewModel.resetState()
                                 lobbyViewModel.loadUserName()
                             }
 
                             LobbyScreen(
                                 viewModel = lobbyViewModel,
-                                onNavigateToGame = { roomCode, playerIdValue ->
+                                onNavigateToGame = { gameIdValue, playerIdValue ->
 
-                                    gameId = roomCode
+                                    gameId = gameIdValue   // ahora sí es el ID real
                                     playerId = playerIdValue
 
                                     currentScreen = "game"
                                 },
                                 onExit = {
-                                    currentScreen = "login" // 🔥 AQUÍ ESTÁ LA CLAVE
+                                    currentScreen = "login" // AQUÍ ESTÁ LA CLAVE
                                 }
                             )
                         }
 
-                        // 🎮 GAME
+                        // -------------------------------------------------------------------------------------------
                         "game" -> {
 
-                            // 🔥 IMPORTANTE: inicializar solo cuando cambia el room
+                            //IMPORTANTE: inicializar solo cuando cambia el room
                             LaunchedEffect(gameId, playerId) {
                                 if (gameId.isBlank() || playerId.isBlank()) return@LaunchedEffect
 
@@ -123,10 +124,27 @@ class MainActivity : ComponentActivity() {
                                 GameScreen(
                                     viewModel = gameViewModel,
                                     onFinishGame = {
-                                        currentScreen = "lobby"
+                                        val state = gameViewModel.uiState.value
+                                        finalCash = state.currentPlayer?.cash ?: 0.0
+                                        isWinner = state.currentPlayer?.active == true
+                                        
+                                        gameViewModel.leaveGame {
+                                            currentScreen = "result"
+                                        }
                                     }
                                 )
                             }
+                        }
+
+                        "result" -> {
+                            ResultScreen(
+                                isWinner = isWinner,
+                                finalCash = finalCash,
+                                onBackToLobby = {
+                                    gameViewModel.clearState()
+                                    currentScreen = "lobby"
+                                }
+                            )
                         }
                     }
                 }

@@ -4,8 +4,9 @@ import com.google.firebase.Timestamp
 
 data class GameDocument(
     val id: String = "",
-    val actualTurn: Int = 0,
-    val maxTurns: Int = 10,
+    val actualTurn: Int = 1,
+    val maxTurns: Int = 0,
+    val targetCash: Double = 5000.0,
     val status: String = ""
 ){
     constructor(): this("")
@@ -17,15 +18,15 @@ data class PlayerDocument(
     val cash: Double = 0.0,
     val active: Boolean = false,
     val done: Boolean = false,
-    val lastAction: String = ""
-){
-    constructor(): this("")
-}
+    val lastAction: String = "",
+    val isHost: Boolean = false
+)
 
 data class TurnDocument(
     val id: String = "",
     val turnNumber: Int = 0,
-    val hasEvent: Boolean = false
+    val hasEvent: Boolean = false,
+    val status: String = "WAITING"
 ){
     constructor(): this("")
 }
@@ -43,11 +44,11 @@ data class ActionDocument(
 
 data class EventDocument(
     val id: String = "",
+    val playerId: String = "",
     val description: String = "",
-    val impact: String = ""
-){
-    constructor(): this("")
-}
+    val impact: String = "",
+    val value: Double = 0.0
+)
 
 data class ChatDocument(
     val id: String = "",

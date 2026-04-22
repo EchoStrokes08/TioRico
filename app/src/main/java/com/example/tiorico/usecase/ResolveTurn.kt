@@ -1,21 +1,22 @@
 package com.example.tiorico.usecase
 
-import com.example.tiorico.data.models.PlayerDocument
+import com.example.tiorico.data.models.Player
 
 data class TurnResult(
-    val updatedPlayers: List<PlayerDocument>,
+    val updatedPlayers: List<Player>,
     val nextTurn: Int
 )
 
 class ResolveTurn {
 
     fun execute(
-        players: List<PlayerDocument>,
+        players: List<Player>,
         currentTurn: Int,
         maxTurns: Int
     ): TurnResult {
 
-        val factor = currentTurn.toDouble() / maxTurns
+        // El factor de riesgo/recompensa aumenta con el turno
+        val progressFactor = currentTurn.toDouble() / maxTurns.coerceAtLeast(1)
 
         val updatedPlayers = players.map { player ->
 
@@ -26,33 +27,43 @@ class ResolveTurn {
             when (player.lastAction) {
 
                 "AHORRAR" -> {
-                    val ganancia = (50.0 * (1 - factor))
-                    dinero += ganancia
+                    // Base 50, disminuye con el tiempo pero siempre suma al menos 10
+                    val baseIngreso = 50.0
+                    val ingresoLeve = (baseIngreso * (1.0 - (progressFactor * 0.8))).coerceAtLeast(10.0)
+                    dinero += ingresoLeve
                 }
 
                 "INVERTIR" -> {
-                    val probGanar = 0.6 - (factor * 0.3)
+                    // Probabilidad de ganar baja (de 70% inicial a 40% final)
+                    val probGanar = (0.7 - (progressFactor * 0.3)).coerceAtLeast(0.3)
+                    
+                    // Ganancia aumenta (de 100 inicial a 400 final)
+                    val gananciaPotencial = 100.0 + (progressFactor * 300.0)
+                    // Pérdida también aumenta (de 50 inicial a 200 final)
+                    val perdidaPotencial = 50.0 + (progressFactor * 150.0)
+
                     val random = Math.random()
-                    dinero += if (random < probGanar) 100.0 else -50.0
+                    dinero += if (random < probGanar) gananciaPotencial else -perdidaPotencial
                 }
 
                 "GASTAR" -> {
-                    val costo = (50 * (1 + factor))
+                    // Costo aumenta (de 50 inicial a 200 final)
+                    val costo = 50.0 + (progressFactor * 150.0)
                     dinero -= costo
                 }
             }
 
             player.copy(
-                cash       = dinero,
-                active     = dinero > 0,
+                cash = dinero,
+                active = dinero > 0,
                 lastAction = "",
-                done       = false       // reset para el siguiente turno
+                done = false
             )
         }
 
         return TurnResult(
             updatedPlayers = updatedPlayers,
-            nextTurn       = currentTurn + 1
+            nextTurn = currentTurn + 1
         )
     }
 }

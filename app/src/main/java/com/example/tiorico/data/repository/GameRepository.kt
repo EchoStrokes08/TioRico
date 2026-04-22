@@ -10,7 +10,7 @@ import kotlinx.coroutines.tasks.await
 
 class GameRepository(private val db: FirebaseFirestore = FirebaseFirestore.getInstance()) {
 
-    // ── Rutas (para no repetir strings por todo el código) ───────────────────
+    // ------- Rutas (para no repetir strings por todo el codigo) ------------
 
     private fun gamesCol()                          = db.collection("games")
     private fun gameDoc(gameId: String)             = gamesCol().document(gameId)
@@ -32,6 +32,7 @@ class GameRepository(private val db: FirebaseFirestore = FirebaseFirestore.getIn
         val game = GameDocument(
             id = ref.id,
             maxTurns = maxTurns,
+            targetCash = 5000.0,
             status = "ESPERANDO"
         )
         ref.set(game).await()
@@ -46,7 +47,7 @@ class GameRepository(private val db: FirebaseFirestore = FirebaseFirestore.getIn
 
             val game = snap
                 ?.toObject(GameDocument::class.java)
-                ?.copy(id = snap.id) // 🔥 FIX
+                ?.copy(id = snap.id)
 
             trySend(game)
         }
@@ -70,19 +71,32 @@ class GameRepository(private val db: FirebaseFirestore = FirebaseFirestore.getIn
         playerDoc(gameId, player.id).set(player).await()
     }
 
-    fun observePlayers(gameId: String): Flow<List<PlayerDocument>> = callbackFlow {
-        val listener = playersCol(gameId).addSnapshotListener { snap, error ->
-            if (error != null) {
-                close(error); return@addSnapshotListener
+    fun observePlayers(gameId: String): Flow<List<Player>> = callbackFlow {
+
+        val listener = playersCol(gameId)
+            .addSnapshotListener { snap, error ->
+
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+
+                val players = snap?.documents?.mapNotNull { doc ->
+                    Player(
+                        id = doc.id,
+                        name = doc.getString("name") ?: "",
+                        cash = doc.getDouble("cash") ?: 0.0,
+                        active = doc.getBoolean("active") ?: true,
+                        done = doc.getBoolean("done") ?: false,
+                        lastAction = doc.getString("lastAction") ?: "",
+                        isHost = (doc["isHost"] as? Boolean) ?: false,
+                        impact = doc.getDouble("impact") ?: 0.0
+                    )
+                } ?: emptyList()
+
+                trySend(players)
             }
 
-            val players = snap?.documents?.mapNotNull { doc ->
-                doc.toObject(PlayerDocument::class.java)
-                    ?.copy(id = doc.id) // 🔥 FIX
-            } ?: emptyList()
-
-            trySend(players)
-        }
         awaitClose { listener.remove() }
     }
 
@@ -91,15 +105,14 @@ class GameRepository(private val db: FirebaseFirestore = FirebaseFirestore.getIn
         playerId: String,
         newCash: Double,
         lastAction: String,
-        active: Boolean
+        active: Boolean,
+        done: Boolean = true
     ): DataResult<Unit> = safeCall {
         playerDoc(gameId, playerId).update(
-            mapOf(
-                "cash" to newCash,
-                "lastAction" to lastAction,
-                "active" to active,
-                "done" to true
-            )
+            "cash", newCash,
+            "lastAction", lastAction,
+            "active", active,
+            "done", done
         ).await()
     }
 
@@ -122,7 +135,7 @@ class GameRepository(private val db: FirebaseFirestore = FirebaseFirestore.getIn
 
     suspend fun createTurn(gameId: String, number: Int): DataResult<String> = safeCall {
         val ref = turnsCol(gameId).document()
-        val turn = TurnDocument(id = ref.id, turnNumber = number, hasEvent = false)
+        val turn = TurnDocument(id = ref.id, turnNumber = number, hasEvent = false, status = "WAITING")
         ref.set(turn).await()
         ref.id
     }
@@ -151,9 +164,36 @@ class GameRepository(private val db: FirebaseFirestore = FirebaseFirestore.getIn
 
             snap.documents.mapNotNull { doc ->
                 doc.toObject(ActionDocument::class.java)
-                    ?.copy(id = doc.id) // 🔥 FIX
+                    ?.copy(id = doc.id)
             }
         }
+    fun observeEvents(gameId: String, turnId: String, playerId: String): Flow<List<EventDocument>> = callbackFlow {
+        val listener = eventsCol(gameId, turnId)
+            .whereEqualTo("playerId", playerId)
+            .addSnapshotListener { snap, error ->
+
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+
+                val events = snap?.documents?.mapNotNull {
+                    it.toObject(EventDocument::class.java)
+                } ?: emptyList()
+
+                trySend(events)
+            }
+
+        awaitClose { listener.remove() }
+    }
+
+    suspend fun updateTurnStatus(
+        gameId: String,
+        turnId: String,
+        status: String
+    ): DataResult<Unit> = safeCall {
+        turnDoc(gameId, turnId).update("status", status).await()
+    }
 
 
     // ════════════════════════════════════════════════════════════════════════
@@ -192,6 +232,44 @@ class GameRepository(private val db: FirebaseFirestore = FirebaseFirestore.getIn
         val snap = gameDoc(gameId).get().await()
 
         snap.toObject(GameDocument::class.java)
-            ?.copy(id = snap.id) // 🔥 FIX
+            ?.copy(id = snap.id)
+    }
+
+    fun observeCurrentTurn(gameId: String): Flow<TurnDocument?> = callbackFlow {
+        val listener = turnsCol(gameId)
+            .orderBy("turnNumber", Query.Direction.DESCENDING)
+            .limit(1)
+            .addSnapshotListener { snap, error ->
+
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+
+                val turn = snap?.documents?.firstOrNull()?.let { doc ->
+                    doc.toObject(TurnDocument::class.java)?.copy(id = doc.id)
+                }
+
+                trySend(turn)
+            }
+
+        awaitClose { listener.remove() }
+    }
+
+    fun observeRecentTurns(gameId: String, limit: Int = 2): Flow<List<TurnDocument>> = callbackFlow {
+        val listener = turnsCol(gameId)
+            .orderBy("turnNumber", Query.Direction.DESCENDING)
+            .limit(limit.toLong())
+            .addSnapshotListener { snap, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                val turns = snap?.documents?.mapNotNull { doc ->
+                    doc.toObject(TurnDocument::class.java)?.copy(id = doc.id)
+                } ?: emptyList()
+                trySend(turns)
+            }
+        awaitClose { listener.remove() }
     }
 }

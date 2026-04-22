@@ -31,7 +31,7 @@ class AuthViewModel : ViewModel() {
 
                 if (user != null) {
 
-                    // ⚠️ no bloquear UI con DB sync pesado
+                    //no bloquear UI con DB sync pesado
                     val userId = user.uid
 
                     _uiState.value = AuthUiState.Success(
@@ -68,40 +68,26 @@ class AuthViewModel : ViewModel() {
                 } catch (e: Exception) {
                     _uiState.value = AuthUiState.Error("Error obteniendo usuario")
                 }
-            }
-        }
-    }
-
-    fun register(email: String, password: String) {
-        if (email.isBlank() || password.isBlank()) {
-            _uiState.value = AuthUiState.Error("Campos vacíos")
-            return
-        }
-
-        viewModelScope.launch {
-            _uiState.value = AuthUiState.Loading
-
-            val result = repository.register(email, password)
-
-            if (result.isSuccess) {
-                val (userId, username) = repository.getUserData()
-                _uiState.value = AuthUiState.Success(userId, username)
-                _eventFlow.emit(UiEvent.NavigateToHome)
             } else {
-                _uiState.value = AuthUiState.Error(
-                    result.exceptionOrNull()?.message ?: "Error en registro"
-                )
+                val errorMsg = result.exceptionOrNull()?.message ?: ""
+
+                val cleanMessage = when {
+                    errorMsg.contains("badly formatted") ->
+                        "Correo inválido"
+
+                    errorMsg.contains("no user record") ->
+                        "Usuario no existe"
+
+                    errorMsg.contains("password is invalid") ->
+                        "Contraseña incorrecta"
+
+                    else -> "Error al iniciar sesión"
+                }
+
+                _uiState.value = AuthUiState.Error(cleanMessage)
             }
         }
     }
-
-    fun logout() {
-        repository.logout()
-        _uiState.value = AuthUiState.Idle
-    }
-
-
-
     sealed class UiEvent {
         object NavigateToHome : UiEvent()
         data class ShowSnackbar(val message: String) : UiEvent()

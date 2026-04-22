@@ -1,131 +1,152 @@
 package com.example.tiorico.data.repository
 
+import com.example.tiorico.data.models.ChatDocument
 import com.example.tiorico.data.models.Player
-import com.google.firebase.database.FirebaseDatabase
+import com.example.tiorico.data.models.PlayerDocument
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Query
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
 
+
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+
 class LobbyRepository {
 
-    private val db = FirebaseDatabase.getInstance().reference
+    private val db = FirebaseFirestore.getInstance()
 
-    suspend fun createGame(playerName: String): Result<Pair<String, String>> {
+    private fun gamesCol() = db.collection("games")
+    private fun gameDoc(gameId: String) = gamesCol().document(gameId)
+    private fun playersCol(gameId: String) = gameDoc(gameId).collection("players")
+    private fun chatCol(gameId: String) = gameDoc(gameId).collection("chat")
+
+    suspend fun createGame(playerName: String): Result<Triple<String, String, String>>{
         return try {
-            val roomCode = UUID.randomUUID().toString().take(6)
+            val gameRef = gamesCol().document()
+            val gameId = gameRef.id
             val playerId = UUID.randomUUID().toString()
 
-            val player = mapOf(
-                "id" to playerId,
-                "name" to playerName
-            )
-
-            val room = mapOf(
-                "players" to mapOf(playerId to player),
-                "host" to playerId,
-                "started" to false
-            )
-
-            db.child("rooms").child(roomCode).setValue(room).await()
-
-            Result.success(roomCode to playerId)
-
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun joinGame(roomCode: String, playerName: String): Result<String> {
-        return try {
-            val playerId = UUID.randomUUID().toString()
-
-            val player = mapOf(
-                "id" to playerId,
-                "name" to playerName
-            )
-
-            db.child("rooms")
-                .child(roomCode)
-                .child("players")
-                .child(playerId)
-                .setValue(player)
-                .await()
-
-            Result.success(playerId)
-
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    fun listenPlayers(roomCode: String, onUpdate: (List<Player>) -> Unit) {
-        db.child("rooms")
-            .child(roomCode)
-            .child("players")
-            .addValueEventListener(object : com.google.firebase.database.ValueEventListener {
-                override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
-
-                    val players = mutableListOf<Player>()
-
-                    snapshot.children.forEach {
-                        val player = it.getValue(Player::class.java)
-                        if (player != null) players.add(player)
-                    }
-
-                    onUpdate(players)
-                }
-
-                override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
-            })
-    }
-
-    suspend fun startGame(roomCode: String): Result<Unit> {
-        return try {
-
-            val firestore = FirebaseFirestore.getInstance()
-
-            // 1. marcar lobby iniciado
-            db.child("rooms")
-                .child(roomCode)
-                .child("started")
-                .setValue(true)
-                .await()
-
-            // 2. crear game
-            val gameRef = firestore.collection("games").document(roomCode)
+            val roomCode = generateRoomCode()
 
             val game = mapOf(
-                "id" to roomCode,
+                "id" to gameId,
+                "roomCode" to roomCode,
+                "hostId" to playerId,
                 "actualTurn" to 1,
-                "maxTurns" to 10,
-                "status" to "JUGANDO"
+                "maxTurns" to 9999,
+                "status" to "ESPERANDO"
+            )
+
+            val player = mapOf(
+                "id" to playerId,
+                "name" to playerName,
+                "cash" to 1000.0,
+                "active" to true,
+                "done" to false,
+                "lastAction" to "",
+                "isHost" to true,
+                "impact" to 0.0
             )
 
             gameRef.set(game).await()
+            playersCol(gameId).document(playerId).set(player).await()
 
-            // 3. COPIAR PLAYERS DE RTDB → FIRESTORE (🔥 FALTANTE CRÍTICO)
-            val snapshot = db.child("rooms")
-                .child(roomCode)
-                .child("players")
+            //DEVOLVEMOS TODO
+            Result.success(Triple(gameId, roomCode, playerId))
+
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun joinGame(roomCode: String, playerName: String): Result<Pair<String, String>> {
+        return try {
+
+            val gameId = findGameByRoomCode(roomCode)
+                ?: return Result.failure(Exception("Sala no existe"))
+
+            val existing = playersCol(gameId)
+                .whereEqualTo("name", playerName)
                 .get()
                 .await()
 
-            snapshot.children.forEach { child ->
-
-                val playerId = child.child("id").getValue(String::class.java) ?: return@forEach
-                val name = child.child("name").getValue(String::class.java) ?: ""
-
-                gameRef.collection("players").document(playerId).set(
-                    mapOf(
-                        "id" to playerId,
-                        "name" to name,
-                        "cash" to 100.0,
-                        "active" to true,
-                        "done" to false,
-                        "lastAction" to ""
-                    )
-                )
+            if (!existing.isEmpty) {
+                return Result.failure(Exception("Ya estás en la sala"))
             }
+
+            val playerId = UUID.randomUUID().toString()
+
+            val player = mapOf(
+                "id" to playerId,
+                "name" to playerName,
+                "cash" to 1000.0,
+                "active" to true,
+                "done" to false,
+                "lastAction" to "",
+                "isHost" to false,
+                "impact" to 0.0
+            )
+
+            playersCol(gameId).document(playerId).set(player).await()
+
+            //ahora devuelve también gameId
+            Result.success(gameId to playerId)
+
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun listenPlayers(gameId: String): Flow<List<Player>> = callbackFlow {
+        val listener = playersCol(gameId)
+            .addSnapshotListener { snap, error ->
+
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+
+                val players = snap?.documents?.map { doc ->
+                    Player(
+                        id = doc.id,
+                        name = doc.getString("name") ?: "",
+                        cash = doc.getDouble("cash") ?: 0.0,
+                        active = doc.getBoolean("active") ?: true,
+                        done = doc.getBoolean("done") ?: false,
+                        lastAction = doc.getString("lastAction") ?: "",
+                        isHost = doc.getBoolean("isHost") ?: false
+                    )
+                } ?: emptyList()
+
+                trySend(players)
+            }
+
+        awaitClose { listener.remove() }
+    }
+
+    fun listenGameStart(gameId: String): Flow<Boolean> = callbackFlow {
+        val listener = gameDoc(gameId)
+            .addSnapshotListener { snap, error ->
+
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+
+                val started = snap?.getString("status") == "JUGANDO"
+                trySend(started)
+            }
+
+        awaitClose { listener.remove() }
+    }
+
+    suspend fun startGame(gameId: String): Result<Unit> {
+        return try {
+            gameDoc(gameId)
+                .update("status", "JUGANDO")
+                .await()
 
             Result.success(Unit)
 
@@ -133,18 +154,63 @@ class LobbyRepository {
             Result.failure(e)
         }
     }
+    private suspend fun findGameByRoomCode(code: String): String? {
+        val snapshot = gamesCol()
+            .whereEqualTo("roomCode", code)
+            .get()
+            .await()
 
-    fun listenGameStart(roomCode: String, onStart: () -> Unit) {
-        db.child("rooms")
-            .child(roomCode)
-            .child("started")
-            .addValueEventListener(object : com.google.firebase.database.ValueEventListener {
-                override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
-                    val started = snapshot.getValue(Boolean::class.java) ?: false
-                    if (started) onStart()
+        return snapshot.documents.firstOrNull()?.id
+    }
+    private fun generateRoomCode(): String {
+        val chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        return (1..6).map { chars.random() }.joinToString("")
+    }
+    suspend fun leaveRoom(gameId: String, playerId: String): Result<Unit> {
+        return try {
+            playersCol(gameId).document(playerId).delete().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun promoteToHost(gameId: String, playerId: String): Result<Unit> {
+        return try {
+            val batch = db.batch()
+            batch.update(gameDoc(gameId), "hostId", playerId)
+            batch.update(playersCol(gameId).document(playerId), "isHost", true)
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun sendMessage(gameId: String, message: ChatDocument): Result<Unit> {
+        return try {
+            val ref = chatCol(gameId).document()
+            ref.set(message.copy(id = ref.id)).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun observeChat(gameId: String): Flow<List<ChatDocument>> = callbackFlow {
+        val listener = chatCol(gameId)
+            .orderBy("timestamp", Query.Direction.ASCENDING)
+            .limitToLast(50)
+            .addSnapshotListener { snap, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
                 }
-
-                override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
-            })
+                val messages = snap?.documents?.mapNotNull { doc ->
+                    doc.toObject(ChatDocument::class.java)?.copy(id = doc.id)
+                } ?: emptyList()
+                trySend(messages)
+            }
+        awaitClose { listener.remove() }
     }
 }
